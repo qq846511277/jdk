@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "ci/ciUtilities.hpp"
 #include "gc/shared/cardTableBarrierSet.hpp"
 #include "gc/shared/cardTable.hpp"
@@ -36,7 +35,7 @@
 // basictype_to_str
 const char* basictype_to_str(BasicType t) {
   const char* str = type2name(t);
-  if (str == NULL) return "illegal";
+  if (str == nullptr) return "illegal";
   return str;
 }
 

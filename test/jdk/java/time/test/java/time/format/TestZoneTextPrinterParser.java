@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -52,6 +52,7 @@ import org.testng.annotations.Test;
 /*
  * @test
  * @bug 8081022 8151876 8166875 8177819 8189784 8206980 8277049 8278434
+ *      8174269
  * @key randomness
  */
 
@@ -94,6 +95,10 @@ public class TestZoneTextPrinterParser extends AbstractTestPrinterParser {
                     String shortDisplayName = tz.getDisplayName(isDST, TimeZone.SHORT, locale);
                     if ((longDisplayName.startsWith("GMT+") && shortDisplayName.startsWith("GMT+"))
                             || (longDisplayName.startsWith("GMT-") && shortDisplayName.startsWith("GMT-"))) {
+                        // exclude ROOT
+                        if (locale.equals(Locale.ROOT)) {
+                            continue;
+                        }
                         printText(locale, zdt, TextStyle.FULL, tz, tz.getID());
                         printText(locale, zdt, TextStyle.SHORT, tz, tz.getID());
                         continue;
@@ -262,7 +267,7 @@ public class TestZoneTextPrinterParser extends AbstractTestPrinterParser {
 
     @Test(dataProvider="roundTripAtOverlap")
     public void test_roundTripAtOverlap(String pattern, String input) {
-        var dtf = DateTimeFormatter.ofPattern(pattern);
+        var dtf = DateTimeFormatter.ofPattern(pattern, Locale.US);
         assertEquals(dtf.format(ZonedDateTime.parse(input, dtf)), input);
         var lc = input.toLowerCase(Locale.ROOT);
         try {
@@ -270,7 +275,7 @@ public class TestZoneTextPrinterParser extends AbstractTestPrinterParser {
             fail("Should throw DateTimeParseException");
         } catch (DateTimeParseException ignore) {}
 
-        dtf = new DateTimeFormatterBuilder().parseCaseInsensitive().appendPattern(pattern).toFormatter();
+        dtf = new DateTimeFormatterBuilder().parseCaseInsensitive().appendPattern(pattern).toFormatter(Locale.US);
         assertEquals(dtf.format(ZonedDateTime.parse(input, dtf)), input);
         assertEquals(dtf.format(ZonedDateTime.parse(lc, dtf)), input);
     }

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2012, 2020 SAP SE. All rights reserved.
+ * Copyright (c) 1997, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,11 +23,10 @@
  *
  */
 
-#include "precompiled.hpp"
-#include "jvm.h"
 #include "asm/assembler.inline.hpp"
 #include "asm/macroAssembler.inline.hpp"
 #include "compiler/disassembler.hpp"
+#include "jvm.h"
 #include "memory/resourceArea.hpp"
 #include "runtime/globals_extension.hpp"
 #include "runtime/java.hpp"
@@ -41,15 +40,8 @@
 
 #include <sys/sysinfo.h>
 #if defined(_AIX)
+#include "os_aix.hpp"
 #include <libperfstat.h>
-#endif
-
-#if defined(LINUX) && defined(VM_LITTLE_ENDIAN)
-#include <sys/auxv.h>
-
-#ifndef PPC_FEATURE2_HTM_NOSC
-#define PPC_FEATURE2_HTM_NOSC (1 << 24)
-#endif
 #endif
 
 bool VM_Version::_is_determine_features_test_running = false;
@@ -97,7 +89,7 @@ void VM_Version::initialize() {
     default: break;
   }
   guarantee(PowerArchitecturePPC64_ok, "PowerArchitecturePPC64 cannot be set to "
-            UINTX_FORMAT " on this machine", PowerArchitecturePPC64);
+            "%zu on this machine", PowerArchitecturePPC64);
 
   // Power 8: Configure Data Stream Control Register.
   if (PowerArchitecturePPC64 >= 8 && has_mfdscr()) {
@@ -115,6 +107,17 @@ void VM_Version::initialize() {
   if (!UseSIGTRAP) {
     MSG(TrapBasedRangeChecks);
     FLAG_SET_ERGO(TrapBasedRangeChecks, false);
+  }
+
+  // Power7 and later.
+  if (PowerArchitecturePPC64 > 6) {
+    if (FLAG_IS_DEFAULT(UsePopCountInstruction)) {
+      FLAG_SET_ERGO(UsePopCountInstruction, true);
+    }
+  }
+
+  if (!VM_Version::has_isel() && FLAG_IS_DEFAULT(ConditionalMoveLimit)) {
+    FLAG_SET_ERGO(ConditionalMoveLimit, 0);
   }
 
   if (PowerArchitecturePPC64 >= 8) {
@@ -176,12 +179,23 @@ void VM_Version::initialize() {
       FLAG_SET_DEFAULT(UseByteReverseInstructions, false);
     }
   }
+
+  if (OptimizeFill) {
+    warning("OptimizeFill is not supported on this CPU.");
+    FLAG_SET_DEFAULT(OptimizeFill, false);
+  }
+
+  if (OptoScheduling) {
+    // The OptoScheduling information is not maintained in ppd.ad.
+    warning("OptoScheduling is not supported on this CPU.");
+    FLAG_SET_DEFAULT(OptoScheduling, false);
+  }
 #endif
 
   // Create and print feature-string.
   char buf[(num_features+1) * 16]; // Max 16 chars per feature.
   jio_snprintf(buf, sizeof(buf),
-               "ppc64%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s",
+               "ppc64%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s",
                (has_fsqrt()   ? " fsqrt"   : ""),
                (has_isel()    ? " isel"    : ""),
                (has_lxarxeh() ? " lxarxeh" : ""),
@@ -198,7 +212,6 @@ void VM_Version::initialize() {
                (has_ldbrx()   ? " ldbrx"   : ""),
                (has_stdbrx()  ? " stdbrx"  : ""),
                (has_vshasig() ? " sha"     : ""),
-               (has_tm()      ? " rtm"     : ""),
                (has_darn()    ? " darn"    : ""),
                (has_brw()     ? " brw"     : "")
                // Make sure number of %s matches num_features!
@@ -207,10 +220,6 @@ void VM_Version::initialize() {
   if (Verbose) {
     print_features();
   }
-
-  // PPC64 supports 8-byte compare-exchange operations (see Atomic::cmpxchg)
-  // and 'atomic long memory ops' (see Unsafe_GetLongVolatile).
-  _supports_cx8 = true;
 
   // Used by C1.
   _supports_atomic_getset4 = true;
@@ -352,6 +361,13 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseSHA, false);
   }
 
+  if (UseSecondarySupersTable && PowerArchitecturePPC64 < 7) {
+    if (!FLAG_IS_DEFAULT(UseSecondarySupersTable)) {
+      warning("UseSecondarySupersTable requires Power7 or later.");
+    }
+    FLAG_SET_DEFAULT(UseSecondarySupersTable, false);
+  }
+
 #ifdef COMPILER2
   if (FLAG_IS_DEFAULT(UseSquareToLenIntrinsic)) {
     UseSquareToLenIntrinsic = true;
@@ -375,45 +391,6 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(UseVectorizedMismatchIntrinsic, false);
   }
 
-
-  // Adjust RTM (Restricted Transactional Memory) flags.
-  if (UseRTMLocking) {
-    // If CPU or OS do not support RTM:
-    if (PowerArchitecturePPC64 < 8) {
-      vm_exit_during_initialization("RTM instructions are not available on this CPU.");
-    }
-
-    if (!has_tm()) {
-      vm_exit_during_initialization("RTM is not supported on this OS version.");
-    }
-
-#if INCLUDE_RTM_OPT
-    if (!FLAG_IS_CMDLINE(UseRTMLocking)) {
-      // RTM locking should be used only for applications with
-      // high lock contention. For now we do not use it by default.
-      vm_exit_during_initialization("UseRTMLocking flag should be only set on command line");
-    }
-#else
-    // Only C2 does RTM locking optimization.
-    vm_exit_during_initialization("RTM locking optimization is not supported in this VM");
-#endif
-  } else { // !UseRTMLocking
-    if (UseRTMForStackLocks) {
-      if (!FLAG_IS_DEFAULT(UseRTMForStackLocks)) {
-        warning("UseRTMForStackLocks flag should be off when UseRTMLocking flag is off");
-      }
-      FLAG_SET_DEFAULT(UseRTMForStackLocks, false);
-    }
-    if (UseRTMDeopt) {
-      FLAG_SET_DEFAULT(UseRTMDeopt, false);
-    }
-#ifdef COMPILER2
-    if (PrintPreciseRTMLockingStatistics) {
-      FLAG_SET_DEFAULT(PrintPreciseRTMLockingStatistics, false);
-    }
-#endif
-  }
-
   // This machine allows unaligned memory accesses
   if (FLAG_IS_DEFAULT(UseUnalignedAccesses)) {
     FLAG_SET_DEFAULT(UseUnalignedAccesses, true);
@@ -426,7 +403,7 @@ void VM_Version::check_virtualizations() {
 #if defined(_AIX)
   int rc = 0;
   perfstat_partition_total_t pinfo;
-  rc = perfstat_partition_total(NULL, &pinfo, sizeof(perfstat_partition_total_t), 1);
+  rc = perfstat_partition_total(nullptr, &pinfo, sizeof(perfstat_partition_total_t), 1);
   if (rc == 1) {
     Abstract_VM_Version::_detected_virtualization = PowerVM;
   }
@@ -435,17 +412,17 @@ void VM_Version::check_virtualizations() {
   // system_type=...qemu indicates PowerKVM
   // e.g. system_type=IBM pSeries (emulated by qemu)
   char line[500];
-  FILE* fp = fopen(info_file, "r");
-  if (fp == NULL) {
+  FILE* fp = os::fopen(info_file, "r");
+  if (fp == nullptr) {
     return;
   }
   const char* system_type="system_type=";  // in case this line contains qemu, it is KVM
   const char* num_lpars="NumLpars="; // in case of non-KVM : if this line is found it is PowerVM
   bool num_lpars_found = false;
 
-  while (fgets(line, sizeof(line), fp) != NULL) {
+  while (fgets(line, sizeof(line), fp) != nullptr) {
     if (strncmp(line, system_type, strlen(system_type)) == 0) {
-      if (strstr(line, "qemu") != 0) {
+      if (strstr(line, "qemu") != nullptr) {
         Abstract_VM_Version::_detected_virtualization = PowerKVM;
         fclose(fp);
         return;
@@ -471,7 +448,7 @@ void VM_Version::print_platform_virtualization_info(outputStream* st) {
   int rc = 0;
   perfstat_partition_total_t pinfo;
   memset(&pinfo, 0, sizeof(perfstat_partition_total_t));
-  rc = perfstat_partition_total(NULL, &pinfo, sizeof(perfstat_partition_total_t), 1);
+  rc = perfstat_partition_total(nullptr, &pinfo, sizeof(perfstat_partition_total_t), 1);
   if (rc != 1) {
     return;
   } else {
@@ -480,7 +457,7 @@ void VM_Version::print_platform_virtualization_info(outputStream* st) {
   // CPU information
   perfstat_cpu_total_t cpuinfo;
   memset(&cpuinfo, 0, sizeof(perfstat_cpu_total_t));
-  rc = perfstat_cpu_total(NULL, &cpuinfo, sizeof(perfstat_cpu_total_t), 1);
+  rc = perfstat_cpu_total(nullptr, &cpuinfo, sizeof(perfstat_cpu_total_t), 1);
   if (rc != 1) {
     return;
   }
@@ -531,7 +508,7 @@ void VM_Version::print_platform_virtualization_info(outputStream* st) {
                        "pool=", // CPU-pool number
                        "pool_capacity=",
                        "NumLpars=", // on non-KVM machines, NumLpars is not found for full partition mode machines
-                       NULL };
+                       nullptr };
   if (!print_matching_lines_from_file(info_file, st, kw)) {
     st->print_cr("  <%s Not Available>", info_file);
   }
@@ -544,7 +521,7 @@ void VM_Version::print_features() {
   if (Verbose) {
     if (ContendedPaddingWidth > 0) {
       tty->cr();
-      tty->print_cr("ContendedPaddingWidth " INTX_FORMAT, ContendedPaddingWidth);
+      tty->print_cr("ContendedPaddingWidth %d", ContendedPaddingWidth);
     }
   }
 }
@@ -596,7 +573,6 @@ void VM_Version::determine_features() {
   a->ldbrx(R7, R3_ARG1, R4_ARG2);              // code[14] -> ldbrx
   a->stdbrx(R7, R3_ARG1, R4_ARG2);             // code[15] -> stdbrx
   a->vshasigmaw(VR0, VR1, 1, 0xF);             // code[16] -> vshasig
-  // rtm is determined by OS
   a->darn(R7);                                 // code[17] -> darn
   a->brw(R5, R6);                              // code[18] -> brw
   a->blr();
@@ -650,7 +626,6 @@ void VM_Version::determine_features() {
   if (code[feature_cntr++]) features |= ldbrx_m;
   if (code[feature_cntr++]) features |= stdbrx_m;
   if (code[feature_cntr++]) features |= vshasig_m;
-  // feature rtm_m is determined by OS
   if (code[feature_cntr++]) features |= darn_m;
   if (code[feature_cntr++]) features |= brw_m;
 
@@ -662,37 +637,6 @@ void VM_Version::determine_features() {
   }
 
   _features = features;
-
-#ifdef AIX
-  // To enable it on AIX it's necessary POWER8 or above and at least AIX 7.2.
-  // Actually, this is supported since AIX 7.1.. Unfortunately, this first
-  // contained bugs, so that it can only be enabled after AIX 7.1.3.30.
-  // The Java property os.version, which is used in RTM tests to decide
-  // whether the feature is available, only knows major and minor versions.
-  // We don't want to change this property, as user code might depend on it.
-  // So the tests can not check on subversion 3.30, and we only enable RTM
-  // with AIX 7.2.
-  if (has_lqarx()) { // POWER8 or above
-    if (os::Aix::os_version() >= 0x07020000) { // At least AIX 7.2.
-      _features |= rtm_m;
-    }
-  }
-#endif
-#if defined(LINUX) && defined(VM_LITTLE_ENDIAN)
-  unsigned long auxv = getauxval(AT_HWCAP2);
-
-  if (auxv & PPC_FEATURE2_HTM_NOSC) {
-    if (auxv & PPC_FEATURE2_HAS_HTM) {
-      // TM on POWER8 and POWER9 in compat mode (VM) is supported by the JVM.
-      // TM on POWER9 DD2.1 NV (baremetal) is not supported by the JVM (TM on
-      // POWER9 DD2.1 NV has a few issues that need a couple of firmware
-      // and kernel workarounds, so there is a new mode only supported
-      // on non-virtualized P9 machines called HTM with no Suspend Mode).
-      // TM on POWER9 D2.2+ NV is not supported at all by Linux.
-      _features |= rtm_m;
-    }
-  }
-#endif
 }
 
 // Power 8: Configure Data Stream Control Register.

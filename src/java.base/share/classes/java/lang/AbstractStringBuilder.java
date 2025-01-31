@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,8 +25,12 @@
 
 package java.lang;
 
-import jdk.internal.math.FloatingDecimal;
+import jdk.internal.math.DoubleToDecimal;
+import jdk.internal.math.FloatToDecimal;
+import jdk.internal.util.DecimalDigits;
 
+import java.io.IOException;
+import java.nio.CharBuffer;
 import java.util.Arrays;
 import java.util.Spliterator;
 import java.util.stream.IntStream;
@@ -56,7 +60,8 @@ import static java.lang.String.checkOffset;
  * @author      Ulf Zibis
  * @since       1.5
  */
-abstract class AbstractStringBuilder implements Appendable, CharSequence {
+abstract sealed class AbstractStringBuilder implements Appendable, CharSequence
+    permits StringBuilder, StringBuffer {
     /**
      * The value is used for character storage.
      */
@@ -66,6 +71,14 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
      * The id of the encoding used to encode the bytes in {@code value}.
      */
     byte coder;
+
+    /**
+     *  The attribute indicates {@code value} might be compressible to LATIN1 if it is UTF16-encoded.
+     *  An inflated byte array becomes compressible only when those non-latin1 chars are deleted.
+     *  We simply set this attribute in all methods which may delete chars. Therefore, there are
+     *  false positives. Subclasses and String need to handle it properly.
+     */
+    boolean maybeLatin1;
 
     /**
      * The count is the number of characters used.
@@ -118,6 +131,9 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
      * as the specified {@code CharSequence}. The initial capacity of
      * the string builder is {@code 16} plus the length of the
      * {@code CharSequence} argument.
+     * <p>
+     * The contents are unspecified if the {@code CharSequence}
+     * is modified during string construction.
      *
      * @param      seq   the sequence to copy.
      */
@@ -131,10 +147,11 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
 
         final byte initCoder;
         if (COMPACT_STRINGS) {
-            if (seq instanceof AbstractStringBuilder) {
-                initCoder = ((AbstractStringBuilder)seq).getCoder();
-            } else if (seq instanceof String) {
-                initCoder = ((String)seq).coder();
+            if (seq instanceof AbstractStringBuilder asb) {
+                initCoder = asb.getCoder();
+                maybeLatin1 |= asb.maybeLatin1;
+            } else if (seq instanceof String s) {
+                initCoder = s.coder();
             } else {
                 initCoder = LATIN1;
             }
@@ -318,6 +335,8 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
             } else {
                 StringUTF16.fillNull(value, count, newLength);
             }
+        } else if (count > newLength) {
+            maybeLatin1 = true;
         }
         count = newLength;
     }
@@ -527,6 +546,7 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
                 inflate();
             }
             StringUTF16.putCharSB(value, index, ch);
+            maybeLatin1 = true;
         }
     }
 
@@ -596,6 +616,7 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
         inflateIfNeededFor(asb);
         asb.getBytes(value, count, coder);
         count += len;
+        maybeLatin1 |= asb.maybeLatin1;
         return this;
     }
 
@@ -619,14 +640,11 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
         int count = this.count;
         byte[] val = this.value;
         if (isLatin1()) {
-            val[count++] = 'n';
-            val[count++] = 'u';
-            val[count++] = 'l';
-            val[count++] = 'l';
+            StringLatin1.putCharsAt(val, count, 'n', 'u', 'l', 'l');
         } else {
-            count = StringUTF16.putCharsAt(val, count, 'n', 'u', 'l', 'l');
+            StringUTF16.putCharsAt(val, count, 'n', 'u', 'l', 'l');
         }
-        this.count = count;
+        this.count = count + 4;
         return this;
     }
 
@@ -649,6 +667,10 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
      * If {@code s} is {@code null}, then this method appends
      * characters as if the s parameter was a sequence containing the four
      * characters {@code "null"}.
+     * <p>
+     * The contents are unspecified if the {@code CharSequence}
+     * is modified during the method call or an exception is thrown
+     * when accessing the {@code CharSequence}.
      *
      * @param   s the sequence to append.
      * @param   start   the starting index of the subsequence to be appended.
@@ -747,25 +769,18 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
         byte[] val = this.value;
         if (isLatin1()) {
             if (b) {
-                val[count++] = 't';
-                val[count++] = 'r';
-                val[count++] = 'u';
-                val[count++] = 'e';
+                StringLatin1.putCharsAt(val, count, 't', 'r', 'u', 'e');
             } else {
-                val[count++] = 'f';
-                val[count++] = 'a';
-                val[count++] = 'l';
-                val[count++] = 's';
-                val[count++] = 'e';
+                StringLatin1.putCharsAt(val, count, 'f', 'a', 'l', 's', 'e');
             }
         } else {
             if (b) {
-                count = StringUTF16.putCharsAt(val, count, 't', 'r', 'u', 'e');
+                StringUTF16.putCharsAt(val, count, 't', 'r', 'u', 'e');
             } else {
-                count = StringUTF16.putCharsAt(val, count, 'f', 'a', 'l', 's', 'e');
+                StringUTF16.putCharsAt(val, count, 'f', 'a', 'l', 's', 'e');
             }
         }
-        this.count = count;
+        this.count = count + (b ? 4 : 5);
         return this;
     }
 
@@ -812,12 +827,12 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
      */
     public AbstractStringBuilder append(int i) {
         int count = this.count;
-        int spaceNeeded = count + Integer.stringSize(i);
+        int spaceNeeded = count + DecimalDigits.stringSize(i);
         ensureCapacityInternal(spaceNeeded);
         if (isLatin1()) {
-            Integer.getChars(i, spaceNeeded, value);
+            DecimalDigits.getCharsLatin1(i, spaceNeeded, value);
         } else {
-            StringUTF16.getChars(i, count, spaceNeeded, value);
+            DecimalDigits.getCharsUTF16(i, spaceNeeded, value);
         }
         this.count = spaceNeeded;
         return this;
@@ -837,12 +852,12 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
      */
     public AbstractStringBuilder append(long l) {
         int count = this.count;
-        int spaceNeeded = count + Long.stringSize(l);
+        int spaceNeeded = count + DecimalDigits.stringSize(l);
         ensureCapacityInternal(spaceNeeded);
         if (isLatin1()) {
-            Long.getChars(l, spaceNeeded, value);
+            DecimalDigits.getCharsLatin1(l, spaceNeeded, value);
         } else {
-            StringUTF16.getChars(l, count, spaceNeeded, value);
+            DecimalDigits.getCharsUTF16(l, spaceNeeded, value);
         }
         this.count = spaceNeeded;
         return this;
@@ -861,7 +876,9 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
      * @return  a reference to this object.
      */
     public AbstractStringBuilder append(float f) {
-        FloatingDecimal.appendTo(f,this);
+        ensureCapacityInternal(count + FloatToDecimal.MAX_CHARS);
+        FloatToDecimal toDecimal = isLatin1() ? FloatToDecimal.LATIN1 : FloatToDecimal.UTF16;
+        count = toDecimal.putDecimal(value, count, f);
         return this;
     }
 
@@ -878,7 +895,9 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
      * @return  a reference to this object.
      */
     public AbstractStringBuilder append(double d) {
-        FloatingDecimal.appendTo(d,this);
+        ensureCapacityInternal(count + DoubleToDecimal.MAX_CHARS);
+        DoubleToDecimal toDecimal = isLatin1() ? DoubleToDecimal.LATIN1 : DoubleToDecimal.UTF16;
+        count = toDecimal.putDecimal(value, count, d);
         return this;
     }
 
@@ -906,6 +925,7 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
         if (len > 0) {
             shift(end, -len);
             this.count = count - len;
+            maybeLatin1 = true;
         }
         return this;
     }
@@ -957,6 +977,7 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
         checkIndex(index, count);
         shift(index + 1, -1);
         count--;
+        maybeLatin1 = true;
         return this;
     }
 
@@ -991,6 +1012,7 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
         shift(end, newCount - count);
         this.count = newCount;
         putStringAt(start, str);
+        maybeLatin1 = true;
         return this;
     }
 
@@ -1212,6 +1234,10 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
      * invocation of this object's
      * {@link #insert(int,CharSequence,int,int) insert}(dstOffset, s, 0, s.length())
      * method.
+     * <p>
+     * The contents are unspecified if the {@code CharSequence}
+     * is modified during the method call or an exception is thrown
+     * when accessing the {@code CharSequence}.
      *
      * <p>If {@code s} is {@code null}, then the four characters
      * {@code "null"} are inserted into this sequence.
@@ -1260,6 +1286,10 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
      * <p>If {@code s} is {@code null}, then this method inserts
      * characters as if the s parameter was a sequence containing the four
      * characters {@code "null"}.
+     * <p>
+     * The contents are unspecified if the {@code CharSequence}
+     * is modified during the method call or an exception is thrown
+     * when accessing the {@code CharSequence}.
      *
      * @param      dstOffset   the offset in this sequence.
      * @param      s       the sequence to be inserted.
@@ -1646,11 +1676,10 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
     /* for readObject() */
     void initBytes(char[] value, int off, int len) {
         if (String.COMPACT_STRINGS) {
-            this.value = StringUTF16.compress(value, off, len);
-            if (this.value != null) {
-                this.coder = LATIN1;
-                return;
-            }
+            byte[] val = StringUTF16.compress(value, off, len);
+            this.coder = StringUTF16.coderFromArrayLen(val, len);
+            this.value = val;
+            return;
         }
         this.coder = UTF16;
         this.value = StringUTF16.toBytes(value, off, len);
@@ -1691,6 +1720,9 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
                     val[j++] = (byte)c;
                 } else {
                     inflate();
+                    // store c to make sure it has a UTF16 char
+                    StringUTF16.putChar(this.value, j++, c);
+                    i++;
                     StringUTF16.putCharsSB(this.value, j, s, i, end);
                     return;
                 }
@@ -1783,6 +1815,10 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
                 } else {
                     count = j;
                     inflate();
+                    // Store c to make sure sb has a UTF16 char
+                    StringUTF16.putChar(this.value, j++, c);
+                    count = j;
+                    i++;
                     StringUTF16.putCharsSB(this.value, j, s, i, end);
                     count += end - i;
                     return;
@@ -1792,5 +1828,156 @@ abstract class AbstractStringBuilder implements Appendable, CharSequence {
             StringUTF16.putCharsSB(this.value, count, s, off, end);
         }
         count += end - off;
+    }
+
+    /**
+     * Used by StringConcatHelper via JLA. Adds the current builder count to the
+     * accumulation of items being concatenated. If the coder for the builder is
+     * UTF16 then upgrade the whole concatenation to UTF16.
+     *
+     * @param lengthCoder running accumulation of length and coder
+     *
+     * @return updated accumulation of length and coder
+     */
+    long mix(long lengthCoder) {
+        return (lengthCoder + count) | ((long)coder << 32);
+    }
+
+    /**
+     * Used by StringConcatHelper via JLA. Adds the characters in the builder value to the
+     * concatenation buffer and then updates the running accumulation of length.
+     *
+     * @param lengthCoder running accumulation of length and coder
+     * @param buffer      concatenation buffer
+     *
+     * @return running accumulation of length and coder minus the number of characters added
+     */
+    long prepend(long lengthCoder, byte[] buffer) {
+        lengthCoder -= count;
+
+        if (lengthCoder < ((long)UTF16 << 32)) {
+            System.arraycopy(value, 0, buffer, (int)lengthCoder, count);
+        } else if (coder == LATIN1) {
+            StringUTF16.inflate(value, 0, buffer, (int)lengthCoder, count);
+        } else {
+            System.arraycopy(value, 0, buffer, (int)lengthCoder << 1, count << 1);
+        }
+
+        return lengthCoder;
+    }
+
+    private AbstractStringBuilder repeat(char c, int count) {
+        int limit = this.count + count;
+        ensureCapacityInternal(limit);
+        boolean isLatin1 = isLatin1();
+        if (isLatin1 && StringLatin1.canEncode(c)) {
+            Arrays.fill(value, this.count, limit, (byte)c);
+        } else {
+            if (isLatin1) {
+                inflate();
+            }
+            for (int index = this.count; index < limit; index++) {
+                StringUTF16.putCharSB(value, index, c);
+            }
+        }
+        this.count = limit;
+        return this;
+    }
+
+    /**
+     * Repeats {@code count} copies of the string representation of the
+     * {@code codePoint} argument to this sequence.
+     * <p>
+     * The length of this sequence increases by {@code count} times the
+     * string representation length.
+     * <p>
+     * It is usual to use {@code char} expressions for code points. For example:
+     * {@snippet lang="java":
+     * // insert 10 asterisks into the buffer
+     * sb.repeat('*', 10);
+     * }
+     *
+     * @param codePoint  code point to append
+     * @param count      number of times to copy
+     *
+     * @return  a reference to this object.
+     *
+     * @throws IllegalArgumentException if the specified {@code codePoint}
+     * is not a valid Unicode code point or if {@code count} is negative.
+     *
+     * @since 21
+     */
+    public AbstractStringBuilder repeat(int codePoint, int count) {
+        if (count < 0) {
+            throw new IllegalArgumentException("count is negative: " + count);
+        } else if (count == 0) {
+            return this;
+        }
+        if (Character.isBmpCodePoint(codePoint)) {
+            repeat((char)codePoint, count);
+        } else {
+            repeat(CharBuffer.wrap(Character.toChars(codePoint)), count);
+        }
+        return this;
+    }
+
+    /**
+     * Appends {@code count} copies of the specified {@code CharSequence} {@code cs}
+     * to this sequence.
+     * <p>
+     * The length of this sequence increases by {@code count} times the
+     * {@code CharSequence} length.
+     * <p>
+     * If {@code cs} is {@code null}, then the four characters
+     * {@code "null"} are repeated into this sequence.
+     * <p>
+     * The contents are unspecified if the {@code CharSequence}
+     * is modified during the method call or an exception is thrown
+     * when accessing the {@code CharSequence}.
+     *
+     * @param cs     a {@code CharSequence}
+     * @param count  number of times to copy
+     *
+     * @return  a reference to this object.
+     *
+     * @throws IllegalArgumentException  if {@code count} is negative
+     *
+     * @since 21
+     */
+    public AbstractStringBuilder repeat(CharSequence cs, int count) {
+        if (count < 0) {
+            throw new IllegalArgumentException("count is negative: " + count);
+        } else if (count == 0) {
+            return this;
+        } else if (count == 1) {
+            return append(cs);
+        }
+        if (cs == null) {
+            cs = "null";
+        }
+        int length = cs.length();
+        if (length == 0) {
+            return this;
+        } else if (length == 1) {
+            return repeat(cs.charAt(0), count);
+        }
+        int offset = this.count;
+        int valueLength = length << coder;
+        if ((Integer.MAX_VALUE - offset) / count < valueLength) {
+            throw new OutOfMemoryError("Required length exceeds implementation limit");
+        }
+        int total = count * length;
+        int limit = offset + total;
+        ensureCapacityInternal(limit);
+        if (cs instanceof String str) {
+            putStringAt(offset, str);
+        } else if (cs instanceof AbstractStringBuilder asb) {
+            append(asb);
+        } else {
+            appendChars(cs, 0, length);
+        }
+        String.repeatCopyRest(value, offset << coder, total << coder, length << coder);
+        this.count = limit;
+        return this;
     }
 }

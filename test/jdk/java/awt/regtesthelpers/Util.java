@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -67,9 +67,6 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-
-import java.security.PrivilegedAction;
-import java.security.AccessController;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -174,6 +171,8 @@ public final class Util {
             if (screen.equals(color)) {
                 return true;
             }
+            System.out.println("Robot.getPixelColor Expected: " + color);
+            System.out.println("Robot.getPixelColor Actual: " + screen);
         }
         return false;
     }
@@ -307,8 +306,13 @@ public final class Util {
      *     {@code InputEvent.BUTTON3_MASK}
      */
     public static void drag(Robot robot, Point startPoint, Point endPoint, int button) {
-        if (!(button == InputEvent.BUTTON1_MASK || button == InputEvent.BUTTON2_MASK
-                || button == InputEvent.BUTTON3_MASK))
+        if (!(button == InputEvent.BUTTON1_MASK
+                || button == InputEvent.BUTTON2_MASK
+                || button == InputEvent.BUTTON3_MASK
+                || button == InputEvent.BUTTON1_DOWN_MASK
+                || button == InputEvent.BUTTON2_DOWN_MASK
+                || button == InputEvent.BUTTON3_DOWN_MASK
+        ))
         {
             throw new IllegalArgumentException("invalid mouse button");
         }
@@ -405,8 +409,7 @@ public final class Util {
     }
 
     /*
-     * The values directly map to the ones of
-     * sun.awt.X11.XWM & sun.awt.motif.MToolkit classes.
+     * The values directly map to the ones of sun.awt.X11.XWM class.
      */
     public final static int
         UNDETERMINED_WM = 1,
@@ -433,8 +436,6 @@ public final class Util {
         try {
             if ("sun.awt.X11.XToolkit".equals(Toolkit.getDefaultToolkit().getClass().getName())) {
                 clazz = Class.forName("sun.awt.X11.XWM");
-            } else if ("sun.awt.motif.MToolkit".equals(Toolkit.getDefaultToolkit().getClass().getName())) {
-                clazz = Class.forName("sun.awt.motif.MToolkit");
             }
         } catch (ClassNotFoundException cnfe) {
             cnfe.printStackTrace();
@@ -446,34 +447,21 @@ public final class Util {
         try {
             final Class _clazz = clazz;
             Method m_addExports = Class.forName("java.awt.Helper").getDeclaredMethod("addExports", String.class, java.lang.Module.class);
-            // No MToolkit anymore: nothing to do about it.
             // We may be called from non-X11 system, and this permission cannot be delegated to a test.
             m_addExports.invoke(null, "sun.awt.X11", Util.class.getModule());
-            Method m_getWMID = (Method)AccessController.doPrivileged(new PrivilegedAction() {
-                    public Object run() {
-                        try {
-                            Method method = _clazz.getDeclaredMethod("getWMID", new Class[] {});
-                            if (method != null) {
-                                method.setAccessible(true);
-                            }
-                            return method;
-                        } catch (NoSuchMethodException e) {
-                            assert false;
-                        } catch (SecurityException e) {
-                            assert false;
-                        }
-                        return null;
-                    }
-                });
-            return ((Integer)m_getWMID.invoke(null, new Object[] {})).intValue();
-        } catch (ClassNotFoundException cnfe) {
-            cnfe.printStackTrace();
-        } catch (NoSuchMethodException nsme) {
-            nsme.printStackTrace();
-        } catch (IllegalAccessException iae) {
-            iae.printStackTrace();
-        } catch (InvocationTargetException ite) {
-            ite.printStackTrace();
+            Method m_getWMID = null;
+            try {
+                m_getWMID = _clazz.getDeclaredMethod("getWMID", new Class[] {});
+                if (m_getWMID != null) {
+                    m_getWMID.setAccessible(true);
+                }
+            } catch (NoSuchMethodException e) {
+                assert false;
+            }
+            return (Integer) m_getWMID.invoke(null, new Object[]{});
+        } catch (ClassNotFoundException | NoSuchMethodException
+                 | IllegalAccessException | InvocationTargetException e) {
+            e.printStackTrace();
         }
         return -1;
     }

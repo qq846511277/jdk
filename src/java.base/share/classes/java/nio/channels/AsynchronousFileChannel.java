@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -240,14 +240,6 @@ public abstract class AsynchronousFileChannel
      *          specific exception</a>)</i>
      * @throws  IOException
      *          If an I/O error occurs
-     * @throws  SecurityException
-     *          If a security manager is installed and it denies an
-     *          unspecified permission required by the implementation.
-     *          In the case of the default provider, the {@link
-     *          SecurityManager#checkRead(String)} method is invoked to check
-     *          read access if the file is opened for reading. The {@link
-     *          SecurityManager#checkWrite(String)} method is invoked to check
-     *          write access if the file is opened for writing
      */
     public static AsynchronousFileChannel open(Path file,
                                                Set<? extends OpenOption> options,
@@ -259,7 +251,7 @@ public abstract class AsynchronousFileChannel
         return provider.newAsynchronousFileChannel(file, options, executor, attrs);
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"}) // generic array construction
+    @SuppressWarnings("rawtypes") // generic array construction
     private static final FileAttribute<?>[] NO_ATTRIBUTES = new FileAttribute[0];
 
     /**
@@ -268,10 +260,10 @@ public abstract class AsynchronousFileChannel
      *
      * <p> An invocation of this method behaves in exactly the same way as the
      * invocation
-     * <pre>
-     *     ch.{@link #open(Path,Set,ExecutorService,FileAttribute[])
-     *       open}(file, opts, null, new FileAttribute&lt;?&gt;[0]);
-     * </pre>
+     * {@snippet lang=java :
+     *     // @link substring="open" target="#open(Path,Set,ExecutorService,FileAttribute[])" :
+     *     ch.open(file, opts, null, new FileAttribute<?>[0]);
+     * }
      * where {@code opts} is a {@code Set} containing the options specified to
      * this method.
      *
@@ -301,14 +293,6 @@ public abstract class AsynchronousFileChannel
      *          specific exception</a>)</i>
      * @throws  IOException
      *          If an I/O error occurs
-     * @throws  SecurityException
-     *          If a security manager is installed and it denies an
-     *          unspecified permission required by the implementation.
-     *          In the case of the default provider, the {@link
-     *          SecurityManager#checkRead(String)} method is invoked to check
-     *          read access if the file is opened for reading. The {@link
-     *          SecurityManager#checkWrite(String)} method is invoked to check
-     *          write access if the file is opened for writing
      */
     public static AsynchronousFileChannel open(Path file, OpenOption... options)
         throws IOException
@@ -425,10 +409,13 @@ public abstract class AsynchronousFileChannel
      * required then a region starting at zero, and no smaller than the
      * expected maximum size of the file, should be locked.  The two-argument
      * {@link #lock(Object,CompletionHandler)} method simply locks a region
-     * of size {@link Long#MAX_VALUE}. If a lock that overlaps the requested
-     * region is already held by this Java virtual machine, or this method has
-     * been invoked to lock an overlapping region and that operation has not
-     * completed, then this method throws {@link OverlappingFileLockException}.
+     * of size {@link Long#MAX_VALUE}.  If the {@code position} is non-negative
+     * and the {@code size} is zero, then a lock of size
+     * {@code Long.MAX_VALUE - position} is returned.  If a lock that
+     * overlaps the requested region is already held by this Java virtual
+     * machine, or this method has been invoked to lock an overlapping region
+     * and that operation has not completed, then this method throws
+     * {@link OverlappingFileLockException}.
      *
      * <p> Some operating systems do not support a mechanism to acquire a file
      * lock in an asynchronous manner. Consequently an implementation may
@@ -454,7 +441,10 @@ public abstract class AsynchronousFileChannel
      *          non-negative
      * @param   size
      *          The size of the locked region; must be non-negative, and the sum
-     *          {@code position}&nbsp;+&nbsp;{@code size} must be non-negative
+     *          {@code position}&nbsp;+&nbsp;{@code size} must be non-negative.
+     *          A value of zero means to lock all bytes from the specified
+     *          starting position to the end of the file, regardless of whether
+     *          the file is subsequently extended or truncated
      * @param   shared
      *          {@code true} to request a shared lock, in which case this
      *          channel must be open for reading (and possibly writing);
@@ -493,9 +483,10 @@ public abstract class AsynchronousFileChannel
      *
      * <p> An invocation of this method of the form {@code ch.lock(att,handler)}
      * behaves in exactly the same way as the invocation
-     * <pre>
-     *     ch.{@link #lock(long,long,boolean,Object,CompletionHandler) lock}(0L, Long.MAX_VALUE, false, att, handler)
-     * </pre>
+     * {@snippet lang=java :
+     *     // @link substring="lock" target="#lock(long,long,boolean,Object,CompletionHandler)" :
+     *     ch.lock(0L, Long.MAX_VALUE, false, att, handler)
+     * }
      *
      * @param   <A>
      *          The type of the attachment
@@ -532,7 +523,10 @@ public abstract class AsynchronousFileChannel
      *          non-negative
      * @param   size
      *          The size of the locked region; must be non-negative, and the sum
-     *          {@code position}&nbsp;+&nbsp;{@code size} must be non-negative
+     *          {@code position}&nbsp;+&nbsp;{@code size} must be non-negative.
+     *          A value of zero means to lock all bytes from the specified
+     *          starting position to the end of the file, regardless of whether
+     *          the file is subsequently extended or truncated
      * @param   shared
      *          {@code true} to request a shared lock, in which case this
      *          channel must be open for reading (and possibly writing);
@@ -563,9 +557,10 @@ public abstract class AsynchronousFileChannel
      *
      * <p> An invocation of this method behaves in exactly the same way as the
      * invocation
-     * <pre>
-     *     ch.{@link #lock(long,long,boolean) lock}(0L, Long.MAX_VALUE, false)
-     * </pre>
+     * {@snippet lang=java :
+     *     // @link substring="lock" target="#lock(long,long,boolean)" :
+     *     ch.lock(0L, Long.MAX_VALUE, false)
+     * }
      *
      * @return  a {@code Future} object representing the pending result
      *
@@ -586,7 +581,9 @@ public abstract class AsynchronousFileChannel
      * either having acquired a lock on the requested region or having failed to
      * do so.  If it fails to acquire a lock because an overlapping lock is held
      * by another program then it returns {@code null}.  If it fails to acquire
-     * a lock for any other reason then an appropriate exception is thrown.
+     * a lock for any other reason then an appropriate exception is thrown.  If
+     * the {@code position} is non-negative and the {@code size} is zero, then a
+     * lock of size {@code Long.MAX_VALUE - position} is returned.
      *
      * @param  position
      *         The position at which the locked region is to start; must be
@@ -594,7 +591,10 @@ public abstract class AsynchronousFileChannel
      *
      * @param  size
      *         The size of the locked region; must be non-negative, and the sum
-     *         {@code position}&nbsp;+&nbsp;{@code size} must be non-negative
+     *         {@code position}&nbsp;+&nbsp;{@code size} must be non-negative.
+     *         A value of zero means to lock all bytes from the specified
+     *         starting position to the end of the file, regardless of whether
+     *         the file is subsequently extended or truncated
      *
      * @param  shared
      *         {@code true} to request a shared lock,
@@ -634,8 +634,10 @@ public abstract class AsynchronousFileChannel
      * <p> An invocation of this method of the form {@code ch.tryLock()}
      * behaves in exactly the same way as the invocation
      *
-     * <pre>
-     *     ch.{@link #tryLock(long,long,boolean) tryLock}(0L, Long.MAX_VALUE, false) </pre>
+     * {@snippet lang=java :
+     *     // @link substring="tryLock" target="#tryLock(long,long,boolean)" :
+     *     ch.tryLock(0L, Long.MAX_VALUE, false)
+     * }
      *
      * @return  A lock object representing the newly-acquired lock,
      *          or {@code null} if the lock could not be acquired

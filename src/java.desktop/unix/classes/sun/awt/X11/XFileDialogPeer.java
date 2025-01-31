@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,8 +32,6 @@ import java.awt.peer.*;
 import java.io.*;
 import java.util.Locale;
 import java.util.Arrays;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 
 import sun.awt.AWTAccessor.ComponentAccessor;
 import sun.util.logging.PlatformLogger;
@@ -139,7 +137,7 @@ class XFileDialogPeer extends XDialogPeer
         this.target = target;
     }
 
-    @SuppressWarnings({"removal","deprecation"})
+    @SuppressWarnings("deprecation")
     private void init(FileDialog target) {
         fileDialog = target; //new Dialog(target, target.getTitle(), false);
         this.title = target.getTitle();
@@ -151,12 +149,7 @@ class XFileDialogPeer extends XDialogPeer
         savedDir = target.getDirectory();
         // Shouldn't save 'user.dir' to 'savedDir'
         // since getDirectory() will be incorrect after handleCancel
-        userDir = AccessController.doPrivileged(
-            new PrivilegedAction<String>() {
-                public String run() {
-                    return System.getProperty("user.dir");
-                }
-            });
+        userDir = System.getProperty("user.dir");
 
         installStrings();
         gbl = new GridBagLayout();
@@ -202,9 +195,8 @@ class XFileDialogPeer extends XDialogPeer
 
         // Fixed 6260650: FileDialog.getDirectory() does not return null when file dialog is cancelled
         // After showing we should display 'user.dir' as current directory
-        // if user didn't set directory programatically
+        // if user didn't set directory programmatically
         pathField = new TextField(savedDir != null ? savedDir : userDir);
-        @SuppressWarnings("serial") // Anonymous class
         Choice tmp = new Choice() {
                 public Dimension getPreferredSize() {
                     return new Dimension(PATH_CHOICE_WIDTH, pathField.getPreferredSize().height);
@@ -712,7 +704,7 @@ class XFileDialogPeer extends XDialogPeer
      * Otherwise, SavedDir will be not null before second showing
      * So the current directory of the file dialog will be incorrect after second showing
      * since 'setDirectory' will be ignored
-     * We cann't update savedDir here now since it used very often
+     * We can't update savedDir here now since it used very often
      */
     public void setDirectory(String dir) {
 
@@ -728,7 +720,7 @@ class XFileDialogPeer extends XDialogPeer
         int i;
         if ((i=dir.indexOf("~")) != -1) {
 
-            dir = dir.substring(0,i) + System.getProperty("user.home") + dir.substring(i+1,dir.length());
+            dir = dir.substring(0,i) + System.getProperty("user.home") + dir.substring(i+1);
         }
 
         File fe = new File(dir).getAbsoluteFile();
@@ -785,7 +777,6 @@ class XFileDialogPeer extends XDialogPeer
     }
 
     // 03/02/2005 b5097243 Pressing 'ESC' on a file dlg does not dispose the dlg on Xtoolkit
-    @SuppressWarnings("deprecation")
     public void setVisible(boolean b){
         if (fileDialog == null) {
             init(target);
@@ -796,7 +787,7 @@ class XFileDialogPeer extends XDialogPeer
         }
 
         if (savedFile != null) {
-            // Actually in Motif implementation lost file value which was saved after prevously showing
+            // Actually in Motif implementation lost file value which was saved after previously showing
             // Seems we shouldn't restore Motif behaviour in this case
             setFile(savedFile);
         }

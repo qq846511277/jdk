@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -167,7 +167,7 @@ Display * dpy = NULL;
 
 static void DestroyXIMCallback(XIM, XPointer, XPointer);
 static void OpenXIMCallback(Display *, XPointer, XPointer);
-/* Solaris XIM Extention */
+/* Solaris XIM Extension */
 #define XNCommitStringCallback "commitStringCallback"
 static void CommitStringCallback(XIC, XPointer, XPointer);
 
@@ -1013,7 +1013,7 @@ createXIC(JNIEnv * env, X11InputMethodData *pX11IMData, Window w)
         }
     }
 
-    // The code set the IC mode that the preedit state is not initialied
+    // The code set the IC mode that the preedit state is not initialized
     // at XmbResetIC.  This attribute can be set at XCreateIC.  I separately
     // set the attribute to avoid the failure of XCreateIC at some platform
     // which does not support the attribute.
@@ -1328,7 +1328,7 @@ static void DestroyXIMCallback(XIM im, XPointer client_data, XPointer call_data)
                 x11InputMethodGRefListHead->inputMethodGRef) == NULL) {
             /* Clear possible exceptions
              */
-            if ((*env)->ExceptionOccurred(env)) {
+            if ((*env)->ExceptionCheck(env)) {
                 (*env)->ExceptionDescribe(env);
                 (*env)->ExceptionClear(env);
             }

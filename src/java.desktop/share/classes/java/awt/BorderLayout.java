@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -419,7 +419,7 @@ public class BorderLayout implements LayoutManager2,
      * @param   constraints  an object that specifies how and where
      *                       the component is added to the layout.
      * @see     java.awt.Container#add(java.awt.Component, java.lang.Object)
-     * @exception   IllegalArgumentException  if the constraint object is not
+     * @throws   IllegalArgumentException  if the constraint object is not
      *              a string, or if it not one of the five specified constants.
      * @since   1.1
      */
@@ -514,7 +514,7 @@ public class BorderLayout implements LayoutManager2,
      *                       {@code LINE_START}, {@code LINE_END}
      * @return  the component at the given location, or {@code null} if
      *          the location is empty
-     * @exception   IllegalArgumentException  if the constraint object is
+     * @throws   IllegalArgumentException  if the constraint object is
      *              not one of the nine specified constants
      * @see     #addLayoutComponent(java.awt.Component, java.lang.Object)
      * @since 1.5
@@ -554,17 +554,17 @@ public class BorderLayout implements LayoutManager2,
      * The {@code Container}'s component orientation is used to determine the location of components
      * added with {@code LINE_START} and {@code LINE_END}.
      *
-     * @param   constraints     the desired absolute position, one of {@code CENTER},
-     *                          {@code NORTH}, {@code SOUTH},
-     *                          {@code EAST}, {@code WEST}
      * @param   target     the {@code Container} used to obtain
      *                     the constraint location based on the target
      *                     {@code Container}'s component orientation.
+     * @param   constraints     the desired absolute position, one of {@code CENTER},
+     *                          {@code NORTH}, {@code SOUTH},
+     *                          {@code EAST}, {@code WEST}
      * @return  the component at the given location, or {@code null} if
      *          the location is empty
-     * @exception   IllegalArgumentException  if the constraint object is
+     * @throws   IllegalArgumentException  if the constraint object is
      *              not one of the five specified constants
-     * @exception   NullPointerException  if the target parameter is null
+     * @throws   NullPointerException  if the target parameter is null
      * @see     #addLayoutComponent(java.awt.Component, java.lang.Object)
      * @since 1.5
      */

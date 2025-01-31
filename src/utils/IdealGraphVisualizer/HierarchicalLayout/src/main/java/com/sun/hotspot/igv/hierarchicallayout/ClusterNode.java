@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,11 +29,8 @@ import com.sun.hotspot.igv.layout.Port;
 import com.sun.hotspot.igv.layout.Vertex;
 import java.awt.Dimension;
 import java.awt.Point;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.awt.Rectangle;
+import java.util.*;
 
 /**
  *
@@ -41,24 +38,37 @@ import java.util.Set;
  */
 public class ClusterNode implements Vertex {
 
+    public static final int PADDING = 8;
     private Cluster cluster;
     private Port inputSlot;
-    private Port outputSlot;
-    private Set<Vertex> subNodes;
+    private final Set<Vertex> subNodes;
     private Dimension size;
     private Point position;
-    private Set<Link> subEdges;
-    private boolean dirty;
+    private final Set<Link> subEdges;
     private boolean root;
-    private String name;
-    public static final int BORDER = 20;
+    private final String name;
+    private final int headerVerticalSpace;
+    private final Dimension emptySize;
 
-    public ClusterNode(Cluster cluster, String name) {
-        this.subNodes = new HashSet<Vertex>();
-        this.subEdges = new HashSet<Link>();
+    public ClusterNode(Cluster cluster, String name, int headerVerticalSpace, Dimension emptySize) {
+        this.subNodes = new HashSet<>();
+        this.subEdges = new HashSet<>();
         this.cluster = cluster;
-        position = new Point(0, 0);
+        this.position = new Point(0, 0);
         this.name = name;
+        this.headerVerticalSpace = headerVerticalSpace;
+        this.emptySize = emptySize;
+        if (emptySize.width > 0 || emptySize.height > 0) {
+            updateSize();
+        }
+    }
+
+    public void updateClusterBounds() {
+        cluster.setBounds(new Rectangle(position, size));
+    }
+
+    public String getName() {
+        return name;
     }
 
     public void addSubNode(Vertex v) {
@@ -74,8 +84,6 @@ public class ClusterNode implements Vertex {
     }
 
     public void updateSize() {
-
-
         calculateSize();
 
         final ClusterNode widget = this;
@@ -88,24 +96,19 @@ public class ClusterNode implements Vertex {
             public Vertex getVertex() {
                 return widget;
             }
-        };
 
-        outputSlot = new Port() {
-
-            public Point getRelativePosition() {
-                return new Point(size.width / 2, 0);//size.height);
-            }
-
-            public Vertex getVertex() {
-                return widget;
+            @Override
+            public String toString() {
+                return "ClusterInput(" + name + ")";
             }
         };
     }
 
     private void calculateSize() {
 
-        if (subNodes.size() == 0) {
-            size = new Dimension(0, 0);
+        if (subNodes.isEmpty()) {
+            size = emptySize;
+            return;
         }
 
         int minX = Integer.MAX_VALUE;
@@ -134,34 +137,31 @@ public class ClusterNode implements Vertex {
             }
         }
 
-        size = new Dimension(maxX - minX, maxY - minY);
+        size = new Dimension(maxX - minX, maxY - minY + headerVerticalSpace);
 
         // Normalize coordinates
         for (Vertex n : subNodes) {
-            n.setPosition(new Point(n.getPosition().x - minX, n.getPosition().y - minY));
+            n.setPosition(new Point(n.getPosition().x - minX,
+                                    n.getPosition().y - minY + headerVerticalSpace));
         }
 
         for (Link l : subEdges) {
-            List<Point> points = new ArrayList<Point>(l.getControlPoints());
+            List<Point> points = new ArrayList<>(l.getControlPoints());
             for (Point p : points) {
                 p.x -= minX;
-                p.y -= minY;
+                p.y = p.y - minY + headerVerticalSpace;
             }
             l.setControlPoints(points);
 
         }
 
-        size.width += 2 * BORDER;
-        size.height += 2 * BORDER;
+        size.width += 2 * PADDING;
+        size.height += 2 * PADDING;
     }
 
     public Port getInputSlot() {
         return inputSlot;
 
-    }
-
-    public Port getOutputSlot() {
-        return outputSlot;
     }
 
     public Dimension getSize() {
@@ -177,17 +177,17 @@ public class ClusterNode implements Vertex {
         this.position = pos;
         for (Vertex n : subNodes) {
             Point cur = new Point(n.getPosition());
-            cur.translate(pos.x + BORDER, pos.y + BORDER);
+            cur.translate(pos.x + PADDING, pos.y + PADDING);
             n.setPosition(cur);
         }
 
         for (Link e : subEdges) {
             List<Point> arr = e.getControlPoints();
-            ArrayList<Point> newArr = new ArrayList<Point>(arr.size());
+            ArrayList<Point> newArr = new ArrayList<>(arr.size());
             for (Point p : arr) {
                 if (p != null) {
                     Point p2 = new Point(p);
-                    p2.translate(pos.x + BORDER, pos.y + BORDER);
+                    p2.translate(pos.x + PADDING, pos.y + PADDING);
                     newArr.add(p2);
                 } else {
                     newArr.add(null);
@@ -204,10 +204,6 @@ public class ClusterNode implements Vertex {
 
     public void setCluster(Cluster c) {
         cluster = c;
-    }
-
-    public void setDirty(boolean b) {
-        dirty = b;
     }
 
     public void setRoot(boolean b) {
@@ -229,5 +225,17 @@ public class ClusterNode implements Vertex {
 
     public Set<? extends Vertex> getSubNodes() {
         return subNodes;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (!(obj instanceof ClusterNode other)) return false;
+        return Objects.equals(this.name, other.name);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(name);
     }
 }

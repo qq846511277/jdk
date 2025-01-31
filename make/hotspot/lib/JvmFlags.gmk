@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -43,7 +43,6 @@ JVM_SRC_DIRS += $(call uniq, $(wildcard $(foreach d, $(JVM_SRC_ROOTS), \
 
 JVM_CFLAGS_INCLUDES += \
     $(patsubst %,-I%,$(JVM_SRC_DIRS)) \
-    -I$(TOPDIR)/src/hotspot/share/precompiled \
     -I$(TOPDIR)/src/hotspot/share/include \
     -I$(TOPDIR)/src/hotspot/os/$(HOTSPOT_TARGET_OS_TYPE)/include \
     -I$(SUPPORT_OUTPUTDIR)/modules_include/java.base \
@@ -67,10 +66,12 @@ JVM_CFLAGS_TARGET_DEFINES += \
     #
 
 ifeq ($(DEBUG_LEVEL), release)
+  # release builds disable uses of assert macro from <assert.h>.
+  JVM_CFLAGS_DEBUGLEVEL := -DNDEBUG
   # For hotspot, release builds differ internally between "optimized" and "product"
   # in that "optimize" does not define PRODUCT.
   ifneq ($(HOTSPOT_DEBUG_LEVEL), optimized)
-    JVM_CFLAGS_DEBUGLEVEL := -DPRODUCT
+    JVM_CFLAGS_DEBUGLEVEL += -DPRODUCT
   endif
 else ifeq ($(DEBUG_LEVEL), fastdebug)
   JVM_CFLAGS_DEBUGLEVEL := -DASSERT
@@ -90,11 +91,6 @@ JVM_CFLAGS += \
     $(JVM_CFLAGS_INCLUDES) \
     $(EXTRA_CFLAGS) \
     #
-
-# -DDONT_USE_PRECOMPILED_HEADER will exclude all includes in precompiled.hpp.
-ifeq ($(USE_PRECOMPILED_HEADER), false)
-  JVM_CFLAGS += -DDONT_USE_PRECOMPILED_HEADER
-endif
 
 ifneq ($(HOTSPOT_OVERRIDE_LIBPATH), )
   JVM_CFLAGS += -DOVERRIDE_LIBPATH='"$(HOTSPOT_OVERRIDE_LIBPATH)"'

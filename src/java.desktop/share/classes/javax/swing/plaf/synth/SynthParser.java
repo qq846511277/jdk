@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -67,7 +67,6 @@ import org.xml.sax.SAXParseException;
 import org.xml.sax.helpers.DefaultHandler;
 
 import com.sun.beans.decoder.DocumentHandler;
-import sun.reflect.misc.ReflectUtil;
 
 class SynthParser extends DefaultHandler {
     //
@@ -124,8 +123,8 @@ class SynthParser extends DefaultHandler {
 
     /**
      * Indicates the depth of how many elements we've encountered but don't
-     * understand. This is used when forwarding to beans persistance to know
-     * when we hsould stop forwarding.
+     * understand. This is used when forwarding to beans persistence to know
+     * when we should stop forwarding.
      */
     private int _depth;
 
@@ -162,7 +161,7 @@ class SynthParser extends DefaultHandler {
     private String _inputMapID;
 
     /**
-     * Object references outside the scope of persistance.
+     * Object references outside the scope of persistence.
      */
     private Map<String,Object> _mapping;
 
@@ -182,7 +181,7 @@ class SynthParser extends DefaultHandler {
     private List<ColorType> _colorTypes;
 
     /**
-     * defaultsPropertys are placed here.
+     * Default properties are placed here.
      */
     private Map<String, Object> _defaultsMap;
 
@@ -240,15 +239,12 @@ class SynthParser extends DefaultHandler {
                 SAXParser saxParser = SAXParserFactory.newInstance().
                                                    newSAXParser();
                 saxParser.parse(new BufferedInputStream(inputStream), this);
-            } catch (ParserConfigurationException e) {
+            } catch (ParserConfigurationException | IOException e) {
                 throw new ParseException("Error parsing: " + e, 0);
             }
             catch (SAXException se) {
                 throw new ParseException("Error parsing: " + se + " " +
                                          se.getException(), 0);
-            }
-            catch (IOException ioe) {
-                throw new ParseException("Error parsing: " + ioe, 0);
             }
         } finally {
             reset();
@@ -263,7 +259,9 @@ class SynthParser extends DefaultHandler {
             return _classResourceBase.getResource(path);
         } else {
             try {
-                return new URL(_urlResourceBase, path);
+                @SuppressWarnings("deprecation")
+                var result = new URL(_urlResourceBase, path);
+                return result;
             } catch (MalformedURLException mue) {
                 return null;
             }
@@ -284,14 +282,14 @@ class SynthParser extends DefaultHandler {
     }
 
     /**
-     * Returns true if we are forwarding to persistance.
+     * Returns true if we are forwarding to persistence.
      */
     private boolean isForwarding() {
         return (_depth > 0);
     }
 
     /**
-     * Handles beans persistance.
+     * Handles beans persistence.
      */
     private DocumentHandler getHandler() {
         if (_handler == null) {
@@ -628,9 +626,7 @@ class SynthParser extends DefaultHandler {
                     try {
                         color = new ColorUIResource((Color)Color.class.
                               getField(value.toUpperCase()).get(Color.class));
-                    } catch (NoSuchFieldException nsfe) {
-                        throw new SAXException("Invalid color name: " + value);
-                    } catch (IllegalAccessException iae) {
+                    } catch (NoSuchFieldException | IllegalAccessException e) {
                         throw new SAXException("Invalid color name: " + value);
                     }
                 }
@@ -649,7 +645,7 @@ class SynthParser extends DefaultHandler {
                     }
                     else {
                         try {
-                            typeClass = ReflectUtil.forName(typeName.substring(
+                            typeClass = Class.forName(typeName.substring(
                                                       0, classIndex));
                         } catch (ClassNotFoundException cnfe) {
                             throw new SAXException("Unknown class: " +
@@ -661,10 +657,7 @@ class SynthParser extends DefaultHandler {
                         _colorTypes.add((ColorType)checkCast(typeClass.
                               getField(typeName.substring(classIndex)).
                               get(typeClass), ColorType.class));
-                    } catch (NoSuchFieldException nsfe) {
-                        throw new SAXException("Unable to find color type: " +
-                                               typeName);
-                    } catch (IllegalAccessException iae) {
+                    } catch (NoSuchFieldException | IllegalAccessException e) {
                         throw new SAXException("Unable to find color type: " +
                                                typeName);
                     }
@@ -672,7 +665,7 @@ class SynthParser extends DefaultHandler {
             }
         }
         if (color == null) {
-            throw new SAXException("color: you must specificy a value");
+            throw new SAXException("color: you must specify a value");
         }
         register(id, color);
         if (_stateInfo != null && _colorTypes.size() > 0) {

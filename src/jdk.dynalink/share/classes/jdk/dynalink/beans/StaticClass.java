@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -102,6 +102,7 @@ import jdk.dynalink.StandardOperation;
  * constructor. You might want to expose a mechanism in your language for
  * selecting a constructor with an explicit signature through
  * {@link BeansLinker#getConstructorMethod(Class, String)}.
+ * @since 9
  */
 public final class StaticClass implements Serializable {
     private static final ClassValue<StaticClass> staticClasses = new ClassValue<>() {

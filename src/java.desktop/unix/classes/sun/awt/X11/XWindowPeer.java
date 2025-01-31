@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -47,8 +47,6 @@ import java.awt.event.FocusEvent;
 import java.awt.event.WindowEvent;
 import java.awt.peer.ComponentPeer;
 import java.awt.peer.WindowPeer;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
@@ -81,7 +79,6 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
 
 
     private boolean cachedFocusableWindow;
-    XWarningWindow warningWindow;
 
     private boolean alwaysOnTop;
     private boolean locationByPlatform;
@@ -217,7 +214,6 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
     private static native String getLocalHostname();
     private static native int getJvmPID();
 
-    @SuppressWarnings("deprecation")
     void postInit(XCreateWindowParams params) {
         super.postInit(params);
 
@@ -276,15 +272,6 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
                     XToolkit.awtUnlock();
                 }
 
-            }
-        }
-
-         // Init warning window(for applets)
-        if (((Window)target).getWarningString() != null) {
-            // accessSystemTray permission allows to display TrayIcon, TrayIcon tooltip
-            // and TrayIcon balloon windows without a warning window.
-            if (!AWTAccessor.getWindowAccessor().isTrayIconWindow((Window)target)) {
-                warningWindow = new XWarningWindow((Window)target, getWindow(), this);
             }
         }
 
@@ -430,7 +417,7 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
     }
     void setIconHints(java.util.List<IconInfo> icons) {
         //This does nothing for XWindowPeer,
-        //It's overriden in XDecoratedPeer
+        //It's overridden in XDecoratedPeer
     }
 
     private static ArrayList<IconInfo> defaultIconInfo;
@@ -486,7 +473,7 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
     //This bug is regression for
     //5025858: Resizing a decorated frame triggers componentResized event twice.
     //Since events are not posted from Component.setBounds we need to send them here.
-    //Note that this function is overriden in XDecoratedPeer so event
+    //Note that this function is overridden in XDecoratedPeer so event
     //posting is not changing for decorated peers
     public void setBounds(int x, int y, int width, int height, int op) {
         XToolkit.awtLock();
@@ -504,9 +491,6 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
 
             boolean isResized = !bounds.getSize().equals(oldBounds.getSize());
             boolean isMoved = !bounds.getLocation().equals(oldBounds.getLocation());
-            if (isMoved || isResized) {
-                repositionSecurityWarning();
-            }
             if (isResized) {
                 postEventToEventQueue(new ComponentEvent(getEventSource(), ComponentEvent.COMPONENT_RESIZED));
             }
@@ -565,7 +549,7 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
     }
 
     /*
-     * Retrives real native focused window and converts it into Java peer.
+     * Retrieves real native focused window and converts it into Java peer.
      */
     static XWindowPeer getNativeFocusedWindowPeer() {
         XBaseWindow baseWindow = XToolkit.windowToXWindow(xGetInputFocus());
@@ -575,7 +559,7 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
     }
 
     /*
-     * Retrives real native focused window and converts it into Java window.
+     * Retrieves real native focused window and converts it into Java window.
      */
     static Window getNativeFocusedWindow() {
         XWindowPeer peer = getNativeFocusedWindowPeer();
@@ -765,29 +749,14 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
         } else {
             // ICCCM 4.1.5 states that a real ConfigureNotify will be sent when
             // a window is resized but the client can not tell if the window was
-            // moved or not. The client should consider the position as unkown
+            // moved or not. The client should consider the position as unknown
             // and use TranslateCoordinates to find the actual position.
-            //
-            // TODO this should be the default for every case.
-            switch (runningWM) {
-                case XWM.CDE_WM:
-                case XWM.MOTIF_WM:
-                case XWM.METACITY_WM:
-                case XWM.MUTTER_WM:
-                case XWM.SAWFISH_WM:
-                case XWM.UNITY_COMPIZ_WM:
-                {
-                    Point xlocation = queryXLocation();
-                    if (log.isLoggable(PlatformLogger.Level.FINE)) {
-                        log.fine("New X location: {0}", xlocation);
-                    }
-                    if (xlocation != null) {
-                        newLocation = xlocation;
-                    }
-                    break;
-                }
-                default:
-                    break;
+            Point xlocation = queryXLocation();
+            if (log.isLoggable(PlatformLogger.Level.FINE)) {
+                log.fine("New X location: {0}", xlocation);
+            }
+            if (xlocation != null) {
+                newLocation = xlocation;
             }
         }
         return newLocation;
@@ -804,10 +773,10 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
         if (insLog.isLoggable(PlatformLogger.Level.FINE)) {
             insLog.fine(xe.toString());
         }
-        checkIfOnNewScreen(toGlobal(new Rectangle(scaleDown(xe.get_x()),
+        checkIfOnNewScreen(new Rectangle(scaleDown(xe.get_x()),
                 scaleDown(xe.get_y()),
                 scaleDown(xe.get_width()),
-                scaleDown(xe.get_height()))));
+                scaleDown(xe.get_height())));
 
         Rectangle oldBounds = getBounds();
 
@@ -824,7 +793,6 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
             AWTAccessor.getComponentAccessor().setLocation(target, x, y);
             postEvent(new ComponentEvent(target, ComponentEvent.COMPONENT_MOVED));
         }
-        repositionSecurityWarning();
     }
 
     final void requestXFocus(long time) {
@@ -1118,9 +1086,6 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
         }
         updateFocusability();
         promoteDefaultPosition();
-        if (!vis && warningWindow != null) {
-            warningWindow.setSecurityWarningVisible(false, false);
-        }
         boolean refreshChildsTransientFor = isVisible() != vis;
         super.setVisible(vis);
         if (refreshChildsTransientFor) {
@@ -1170,7 +1135,6 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
         if (isOverrideRedirect() && vis) {
             updateChildrenSizes();
         }
-        repositionSecurityWarning();
     }
 
     protected void suppressWmTakeFocus(boolean doSuppress) {
@@ -1178,9 +1142,6 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
 
     final boolean isSimpleWindow() {
         return !(target instanceof Frame || target instanceof Dialog);
-    }
-    boolean hasWarningWindow() {
-        return ((Window)target).getWarningString() != null;
     }
 
     // The height of menu bar window
@@ -1193,68 +1154,14 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
     void updateChildrenSizes() {
     }
 
-    public void repositionSecurityWarning() {
-        // NOTE: On KWin if the window/border snapping option is enabled,
-        // the Java window may be swinging while it's being moved.
-        // This doesn't make the application unusable though looks quite ugly.
-        // Probobly we need to find some hint to assign to our Security
-        // Warning window in order to exclude it from the snapping option.
-        // We are not currently aware of existance of such a property.
-        if (warningWindow != null) {
-            // We can't use the coordinates stored in the XBaseWindow since
-            // they are zeros for decorated frames.
-            ComponentAccessor compAccessor = AWTAccessor.getComponentAccessor();
-            int x = compAccessor.getX(target);
-            int y = compAccessor.getY(target);
-            int width = compAccessor.getWidth(target);
-            int height = compAccessor.getHeight(target);
-            warningWindow.reposition(x, y, width, height);
-        }
-    }
-
     @Override
     protected void setMouseAbove(boolean above) {
         super.setMouseAbove(above);
-        updateSecurityWarningVisibility();
     }
 
     @Override
     public void setFullScreenExclusiveModeState(boolean state) {
         super.setFullScreenExclusiveModeState(state);
-        updateSecurityWarningVisibility();
-    }
-
-    public void updateSecurityWarningVisibility() {
-        if (warningWindow == null) {
-            return;
-        }
-
-        if (!isVisible()) {
-            return; // The warning window should already be hidden.
-        }
-
-        boolean show = false;
-
-        if (!isFullScreenExclusiveMode()) {
-            int state = getWMState();
-
-            // getWMState() always returns 0 (Withdrawn) for simple windows. Hence
-            // we ignore the state for such windows.
-            if (isVisible() && (state == XUtilConstants.NormalState || isSimpleWindow())) {
-                if (XKeyboardFocusManagerPeer.getInstance().getCurrentFocusedWindow() ==
-                        getTarget())
-                {
-                    show = true;
-                }
-
-                if (isMouseAbove() || warningWindow.isMouseAbove())
-                {
-                    show = true;
-                }
-            }
-        }
-
-        warningWindow.setSecurityWarningVisible(show, true);
     }
 
     boolean isOverrideRedirect() {
@@ -1281,10 +1188,6 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
             windows.remove(this);
         } finally {
             SunToolkit.awtUnlock();
-        }
-
-        if (warningWindow != null) {
-            warningWindow.destroy();
         }
 
         removeRootPropertyEventDispatcher();
@@ -1316,7 +1219,6 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
 //         if (ve.get_state() == XlibWrapper.VisibilityUnobscured) {
 //             // raiseInputMethodWindow
 //         }
-        repositionSecurityWarning();
     }
 
     void handleRootPropertyNotify(XEvent xev) {
@@ -1337,12 +1239,7 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
             return;
         }
 
-        @SuppressWarnings("removal")
-        final String desktopStartupId = AccessController.doPrivileged(new PrivilegedAction<String>() {
-            public String run() {
-                return XToolkit.getEnv("DESKTOP_STARTUP_ID");
-            }
-        });
+        final String desktopStartupId = XToolkit.getEnv("DESKTOP_STARTUP_ID");
         if (desktopStartupId == null) {
             return;
         }
@@ -1497,8 +1394,6 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
         for (ToplevelStateListener topLevelListenerTmp : toplevelStateListeners) {
             topLevelListenerTmp.stateChangedICCCM(oldState, newState);
         }
-
-        updateSecurityWarningVisibility();
     }
 
     boolean isWithdrawn() {
@@ -1698,7 +1593,7 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
     /*
      * This method does nothing if this window is not blocked by any modal dialog.
      * For modal blocked windows this method looks up for the nearest
-     *  prevTransiendFor window that is in the same state (Normal/Iconified/Withdrawn)
+     *  prevTransientFor window that is in the same state (Normal/Iconified/Withdrawn)
      *  as this one and makes this window transient for it. The same operation is
      *  performed for nextTransientFor window.
      * Values of prevTransientFor and nextTransientFor fields are not changed.
@@ -1943,7 +1838,7 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
     public boolean requestWindowFocus(long time, boolean timeProvided) {
         focusLog.fine("Request for window focus");
         // If this is Frame or Dialog we can't assure focus request success - but we still can try
-        // If this is Window and its owner Frame is active we can be sure request succedded.
+        // If this is Window and its owner Frame is active we can be sure request succeeded.
         Window ownerWindow  = XWindowPeer.getDecoratedOwner((Window)target);
         Window focusedWindow = XKeyboardFocusManagerPeer.getInstance().getCurrentFocusedWindow();
         Window activeWindow = XWindowPeer.getDecoratedOwner(focusedWindow);
@@ -1968,7 +1863,7 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
         return false;
     }
 
-    // This method is to be overriden in XDecoratedPeer.
+    // This method is to be overridden in XDecoratedPeer.
     void setActualFocusedWindow(XWindowPeer actualFocusedWindow) {
     }
 
@@ -2226,7 +2121,7 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
             }
 
             // note that we need to pass dragging events to the grabber (6390326)
-            // see comment above for more inforamtion.
+            // see comment above for more information.
             if (!containsGlobal(scaleDown(xme.get_x_root()),
                                 scaleDown(xme.get_y_root()))
                     && !dragging) {

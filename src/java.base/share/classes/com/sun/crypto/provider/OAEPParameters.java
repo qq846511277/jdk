@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -56,9 +56,9 @@ public final class OAEPParameters extends AlgorithmParametersSpi {
     private String mdName;
     private MGF1ParameterSpec mgfSpec;
     private byte[] p;
-    private static ObjectIdentifier OID_MGF1 =
+    private static final ObjectIdentifier OID_MGF1 =
             ObjectIdentifier.of(KnownOIDs.MGF1);
-    private static ObjectIdentifier OID_PSpecified =
+    private static final ObjectIdentifier OID_PSpecified =
             ObjectIdentifier.of(KnownOIDs.PSpecified);
 
     public OAEPParameters() {
@@ -107,8 +107,12 @@ public final class OAEPParameters extends AlgorithmParametersSpi {
             if (!val.getOID().equals(OID_MGF1)) {
                 throw new IOException("Only MGF1 mgf is supported");
             }
+            byte[] encodedParams = val.getEncodedParams();
+            if (encodedParams == null) {
+                throw new IOException("Missing MGF1 parameters");
+            }
             AlgorithmId params = AlgorithmId.parse(
-                    new DerValue(val.getEncodedParams()));
+                    new DerValue(encodedParams));
             mgfSpec = switch (params.getName()) {
                 case "SHA-1" -> MGF1ParameterSpec.SHA1;
                 case "SHA-224" -> MGF1ParameterSpec.SHA224;
@@ -129,7 +133,12 @@ public final class OAEPParameters extends AlgorithmParametersSpi {
             if (!val.getOID().equals(OID_PSpecified)) {
                 throw new IOException("Wrong OID for pSpecified");
             }
-            p = DerValue.wrap(val.getEncodedParams()).getOctetString();
+            byte[] encodedParams = val.getEncodedParams();
+            if (encodedParams == null) {
+                throw new IOException("Missing pSpecified label");
+            }
+
+            p = DerValue.wrap(encodedParams).getOctetString();
         } else {
             p = new byte[0];
         }
@@ -148,7 +157,7 @@ public final class OAEPParameters extends AlgorithmParametersSpi {
     protected <T extends AlgorithmParameterSpec>
         T engineGetParameterSpec(Class<T> paramSpec)
         throws InvalidParameterSpecException {
-        if (OAEPParameterSpec.class.isAssignableFrom(paramSpec)) {
+        if (paramSpec.isAssignableFrom(OAEPParameterSpec.class)) {
             return paramSpec.cast(
                 new OAEPParameterSpec(mdName, "MGF1", mgfSpec,
                                       new PSource.PSpecified(p)));
@@ -171,7 +180,7 @@ public final class OAEPParameters extends AlgorithmParametersSpi {
                                   " impl not found");
         }
         tmp2 = new DerOutputStream();
-        mdAlgId.derEncode(tmp2);
+        mdAlgId.encode(tmp2);
         tmp.write(DerValue.createTag(DerValue.TAG_CONTEXT, true, (byte)0),
                       tmp2);
 
@@ -216,11 +225,9 @@ public final class OAEPParameters extends AlgorithmParametersSpi {
     }
 
     protected String engineToString() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("MD: " + mdName + "\n");
-        sb.append("MGF: MGF1" + mgfSpec.getDigestAlgorithm() + "\n");
-        sb.append("PSource: PSpecified " +
-            (p.length==0? "":Debug.toHexString(new BigInteger(p))) + "\n");
-        return sb.toString();
+        return "MD: " + mdName + "\n" +
+                "MGF: MGF1" + mgfSpec.getDigestAlgorithm() + "\n" +
+                "PSource: PSpecified " +
+                (p.length == 0 ? "" : Debug.toHexString(new BigInteger(p))) + "\n";
     }
 }

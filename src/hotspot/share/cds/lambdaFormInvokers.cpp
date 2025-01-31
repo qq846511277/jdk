@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,12 +22,12 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "cds/archiveBuilder.hpp"
 #include "cds/lambdaFormInvokers.hpp"
 #include "cds/metaspaceShared.hpp"
-#include "classfile/classLoadInfo.hpp"
+#include "cds/regeneratedClasses.hpp"
 #include "classfile/classFileStream.hpp"
+#include "classfile/classLoadInfo.hpp"
 #include "classfile/javaClasses.inline.hpp"
 #include "classfile/klassFactory.hpp"
 #include "classfile/symbolTable.hpp"
@@ -50,8 +50,7 @@
 #include "runtime/mutexLocker.hpp"
 
 GrowableArrayCHeap<char*, mtClassShared>* LambdaFormInvokers::_lambdaform_lines = nullptr;
-Array<Array<char>*>*  LambdaFormInvokers::_static_archive_invokers = nullptr;
-GrowableArrayCHeap<OopHandle, mtClassShared>* LambdaFormInvokers::_regenerated_mirrors = nullptr;
+Array<u4>*  LambdaFormInvokers::_static_archive_invokers = nullptr;
 
 #define NUM_FILTER 4
 static const char* filter[NUM_FILTER] = {"java.lang.invoke.Invokers$Holder",
@@ -67,40 +66,16 @@ static bool should_be_archived(char* line) {
   }
   return false;
 }
-
-void LambdaFormInvokers::append_filtered(char* line) {
-  if (should_be_archived(line)) {
-      append(line);
-  }
-}
 #undef NUM_FILTER
 
 void LambdaFormInvokers::append(char* line) {
   MutexLocker ml(Thread::current(), LambdaFormInvokers_lock);
-  if (_lambdaform_lines == NULL) {
+  if (_lambdaform_lines == nullptr) {
     _lambdaform_lines = new GrowableArrayCHeap<char*, mtClassShared>(150);
   }
   _lambdaform_lines->append(line);
 }
 
-// The regenerated Klass is not added to any class loader, so we need
-// to keep its java_mirror alive to avoid class unloading.
-void LambdaFormInvokers::add_regenerated_class(oop regenerated_class) {
-  if (_regenerated_mirrors == nullptr) {
-    _regenerated_mirrors = new GrowableArrayCHeap<OopHandle, mtClassShared>(150);
-  }
-  _regenerated_mirrors->append(OopHandle(Universe::vm_global(), regenerated_class));
-}
-
-void LambdaFormInvokers::cleanup_regenerated_classes() {
-  if (_regenerated_mirrors == nullptr) return;
-
-  for (int i = 0; i < _regenerated_mirrors->length(); i++) {
-    _regenerated_mirrors->at(i).release(Universe::vm_global());
-  }
-  delete _regenerated_mirrors;
-  _regenerated_mirrors = nullptr;
-}
 
 // convenient output
 class PrintLambdaFormMessage {
@@ -120,11 +95,26 @@ void LambdaFormInvokers::regenerate_holder_classes(TRAPS) {
     return;
   }
 
+  if (CDSConfig::is_dumping_static_archive() && CDSConfig::is_dumping_invokedynamic()) {
+    // Work around JDK-8310831, as some methods in lambda form holder classes may not get generated.
+    log_info(cds)("Archived MethodHandles may refer to lambda form holder classes. Cannot regenerate.");
+    return;
+  }
+
+  if (CDSConfig::is_dumping_dynamic_archive() && CDSConfig::is_dumping_aot_linked_classes() &&
+      CDSConfig::is_using_aot_linked_classes()) {
+    // The base archive may have some pre-resolved CP entries that point to the lambda form holder
+    // classes in the base archive. If we generate new versions of these classes, those CP entries
+    // will be pointing to invalid classes.
+    log_info(cds)("Base archive already has aot-linked lambda form holder classes. Cannot regenerate.");
+    return;
+  }
+
   ResourceMark rm(THREAD);
 
   Symbol* cds_name  = vmSymbols::jdk_internal_misc_CDS();
   Klass*  cds_klass = SystemDictionary::resolve_or_null(cds_name, THREAD);
-  guarantee(cds_klass != NULL, "jdk/internal/misc/CDS must exist!");
+  guarantee(cds_klass != nullptr, "jdk/internal/misc/CDS must exist!");
 
   HandleMark hm(THREAD);
   int len = _lambdaform_lines->length();
@@ -151,7 +141,7 @@ void LambdaFormInvokers::regenerate_holder_classes(TRAPS) {
     if (!PENDING_EXCEPTION->is_a(vmClasses::OutOfMemoryError_klass())) {
       log_error(cds)("%s: %s", PENDING_EXCEPTION->klass()->external_name(),
                      java_lang_String::as_utf8_string(java_lang_Throwable::message(PENDING_EXCEPTION)));
-      if (DumpSharedSpaces) {
+      if (CDSConfig::is_dumping_static_archive()) {
         log_error(cds)("Failed to generate LambdaForm holder classes. Is your classlist out of date?");
       } else {
         log_error(cds)("Failed to generate LambdaForm holder classes. Was the base archive generated with an outdated classlist?");
@@ -167,27 +157,39 @@ void LambdaFormInvokers::regenerate_holder_classes(TRAPS) {
   for (int i = 0; i < sz; i+= 2) {
     Handle h_name(THREAD, h_array->obj_at(i));
     typeArrayHandle h_bytes(THREAD, (typeArrayOop)h_array->obj_at(i+1));
-    assert(h_name != NULL, "Class name is NULL");
-    assert(h_bytes != NULL, "Class bytes is NULL");
+    assert(h_name != nullptr, "Class name is null");
+    assert(h_bytes != nullptr, "Class bytes is null");
 
     char *class_name = java_lang_String::as_utf8_string(h_name());
-    int len = h_bytes->length();
-    // make a copy of class bytes so GC will not affect us.
-    char *buf = NEW_RESOURCE_ARRAY(char, len);
-    memcpy(buf, (char*)h_bytes->byte_at_addr(0), len);
-    ClassFileStream st((u1*)buf, len, NULL, ClassFileStream::verify);
-    regenerate_class(class_name, st, CHECK);
+    if (strstr(class_name, "java/lang/invoke/BoundMethodHandle$Species_") != nullptr) {
+      // The species classes are already loaded into the system dictionary
+      // during the execution of CDS.generateLambdaFormHolderClasses(). No
+      // need to regenerate.
+      TempNewSymbol class_name_sym = SymbolTable::new_symbol(class_name);
+      Klass* klass = SystemDictionary::resolve_or_null(class_name_sym, THREAD);
+      assert(klass != nullptr, "must already be loaded");
+      if (!klass->is_shared() && klass->shared_classpath_index() < 0) {
+        // Fake it, so that it will be included into the archive.
+        klass->set_shared_classpath_index(0);
+        // Set the "generated" bit, so it won't interfere with JVMTI.
+        // See SystemDictionaryShared::find_builtin_class().
+        klass->set_is_generated_shared_class();
+      }
+    } else {
+      int len = h_bytes->length();
+      // make a copy of class bytes so GC will not affect us.
+      char *buf = NEW_RESOURCE_ARRAY(char, len);
+      memcpy(buf, (char*)h_bytes->byte_at_addr(0), len);
+      ClassFileStream st((u1*)buf, len, nullptr);
+      regenerate_class(class_name, st, CHECK);
+    }
   }
 }
 
-void LambdaFormInvokers::regenerate_class(char* name, ClassFileStream& st, TRAPS) {
-  Symbol* class_name = SymbolTable::new_symbol((const char*)name);
-  // the class must exist
-  Klass* klass = SystemDictionary::resolve_or_null(class_name, THREAD);
-  if (klass == NULL) {
-    log_info(cds)("Class %s not present, skip", name);
-    return;
-  }
+void LambdaFormInvokers::regenerate_class(char* class_name, ClassFileStream& st, TRAPS) {
+  TempNewSymbol class_name_sym = SymbolTable::new_symbol(class_name);
+  Klass* klass = SystemDictionary::resolve_or_null(class_name_sym, THREAD);
+  assert(klass != nullptr, "must exist");
   assert(klass->is_instance_klass(), "Should be");
 
   ClassLoaderData* cld = ClassLoaderData::the_null_class_loader_data();
@@ -195,27 +197,26 @@ void LambdaFormInvokers::regenerate_class(char* name, ClassFileStream& st, TRAPS
   ClassLoadInfo cl_info(protection_domain);
 
   InstanceKlass* result = KlassFactory::create_from_stream(&st,
-                                                   class_name,
+                                                   class_name_sym,
                                                    cld,
                                                    cl_info,
                                                    CHECK);
 
   assert(result->java_mirror() != nullptr, "must be");
-  add_regenerated_class(result->java_mirror());
+  RegeneratedClasses::add_class(InstanceKlass::cast(klass), result);
 
-  {
-    MutexLocker mu_r(THREAD, Compile_lock); // add_to_hierarchy asserts this.
-    SystemDictionary::add_to_hierarchy(result);
-  }
+  result->add_to_hierarchy(THREAD);
+
   // new class not linked yet.
   MetaspaceShared::try_link_class(THREAD, result);
   assert(!HAS_PENDING_EXCEPTION, "Invariant");
 
-  // exclude the existing class from dump
-  SystemDictionaryShared::set_excluded(InstanceKlass::cast(klass));
-  SystemDictionaryShared::init_dumptime_info(result);
+  result->set_is_generated_shared_class();
+  if (!klass->is_shared()) {
+    SystemDictionaryShared::set_excluded(InstanceKlass::cast(klass)); // exclude the existing class from dump
+  }
   log_info(cds, lambda)("Regenerated class %s, old: " INTPTR_FORMAT " new: " INTPTR_FORMAT,
-                 name, p2i(klass), p2i(result));
+                 class_name, p2i(klass), p2i(result));
 }
 
 void LambdaFormInvokers::dump_static_archive_invokers() {
@@ -229,7 +230,7 @@ void LambdaFormInvokers::dump_static_archive_invokers() {
       }
     }
     if (count > 0) {
-      _static_archive_invokers = ArchiveBuilder::new_ro_array<Array<char>*>(count);
+      _static_archive_invokers = ArchiveBuilder::new_ro_array<u4>(count);
       int index = 0;
       for (int i = 0; i < len; i++) {
         char* str = _lambdaform_lines->at(i);
@@ -238,8 +239,7 @@ void LambdaFormInvokers::dump_static_archive_invokers() {
           Array<char>* line = ArchiveBuilder::new_ro_array<char>((int)str_len);
           strncpy(line->adr_at(0), str, str_len);
 
-          _static_archive_invokers->at_put(index, line);
-          ArchivePtrMarker::mark_pointer(_static_archive_invokers->adr_at(index));
+          _static_archive_invokers->at_put(index, ArchiveBuilder::current()->any_to_offset_u4(line));
           index++;
         }
       }
@@ -252,7 +252,8 @@ void LambdaFormInvokers::dump_static_archive_invokers() {
 void LambdaFormInvokers::read_static_archive_invokers() {
   if (_static_archive_invokers != nullptr) {
     for (int i = 0; i < _static_archive_invokers->length(); i++) {
-      Array<char>* line = _static_archive_invokers->at(i);
+      u4 offset = _static_archive_invokers->at(i);
+      Array<char>* line = ArchiveUtils::offset_to_archived_address<Array<char>*>(offset);
       char* str = line->adr_at(0);
       append(str);
     }
@@ -261,5 +262,5 @@ void LambdaFormInvokers::read_static_archive_invokers() {
 }
 
 void LambdaFormInvokers::serialize(SerializeClosure* soc) {
-  soc->do_ptr((void**)&_static_archive_invokers);
+  soc->do_ptr(&_static_archive_invokers);
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,12 +36,9 @@ import com.sun.net.httpserver.*;
 import jdk.test.lib.net.SimpleSSLContext;
 import jdk.test.lib.net.URIBuilder;
 
-import java.util.*;
 import java.util.concurrent.*;
 import java.io.*;
 import java.net.*;
-import java.security.*;
-import java.security.cert.*;
 import javax.net.ssl.*;
 
 /* basic http/s connectivity test
@@ -89,9 +86,8 @@ public class SelCacheTest extends Test {
             test(false, "https", root+"/test1", loopback, httpsport, "largefile.txt", 2730088);
             System.out.println("OK");
         } finally {
-            delay();
-            s1.stop(2);
-            s2.stop(2);
+            s1.stop(0);
+            s2.stop(0);
             executor.shutdown();
         }
     }

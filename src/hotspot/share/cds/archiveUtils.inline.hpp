@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,10 @@
 
 #include "cds/archiveUtils.hpp"
 
+#include "cds/archiveBuilder.hpp"
+#include "oops/array.hpp"
 #include "utilities/bitMap.inline.hpp"
+#include "utilities/growableArray.hpp"
 
 inline bool SharedDataRelocator::do_bit(size_t offset) {
   address* p = _patch_base + offset;
@@ -35,10 +38,10 @@ inline bool SharedDataRelocator::do_bit(size_t offset) {
 
   address old_ptr = *p;
   assert(_valid_old_base <= old_ptr && old_ptr < _valid_old_end, "must be");
-  assert(old_ptr != NULL, "bits for NULL pointers should have been cleaned at dump time");
+  assert(old_ptr != nullptr, "bits for null pointers should have been cleaned at dump time");
 
   address new_ptr = old_ptr + _delta;
-  assert(new_ptr != NULL, "don't point to the bottom of the archive"); // See ArchivePtrMarker::mark_pointer().
+  assert(new_ptr != nullptr, "don't point to the bottom of the archive"); // See ArchivePtrMarker::mark_pointer().
   assert(_valid_new_base <= new_ptr && new_ptr < _valid_new_end, "must be");
 
   DEBUG_ONLY(log_trace(cds, reloc)("Patch2: @%8d [" PTR_FORMAT "] " PTR_FORMAT " -> " PTR_FORMAT,
@@ -46,5 +49,20 @@ inline bool SharedDataRelocator::do_bit(size_t offset) {
   *p = new_ptr;
   return true; // keep iterating
 }
+
+// Returns the address of an Array<T> that's allocated in the ArchiveBuilder "buffer" space.
+template <typename T>
+Array<T>* ArchiveUtils::archive_array(GrowableArray<T>* tmp_array) {
+  Array<T>* archived_array = ArchiveBuilder::new_ro_array<T>(tmp_array->length());
+  for (int i = 0; i < tmp_array->length(); i++) {
+    archived_array->at_put(i, tmp_array->at(i));
+    if (std::is_pointer<T>::value) {
+      ArchivePtrMarker::mark_pointer(archived_array->adr_at(i));
+    }
+  }
+
+  return archived_array;
+}
+
 
 #endif // SHARE_CDS_ARCHIVEUTILS_INLINE_HPP

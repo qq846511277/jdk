@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -66,47 +66,14 @@ inline bool LinearScan::is_caller_save(int assigned_reg) {
 
 
 inline void LinearScan::pd_add_temps(LIR_Op* op) {
-  switch (op->code()) {
-    case lir_tan: {
-      // The slow path for these functions may need to save and
-      // restore all live registers but we don't want to save and
-      // restore everything all the time, so mark the xmms as being
-      // killed.  If the slow path were explicit or we could propagate
-      // live register masks down to the assembly we could do better
-      // but we don't have any easy way to do that right now.  We
-      // could also consider not killing all xmm registers if we
-      // assume that slow paths are uncommon but it's not clear that
-      // would be a good idea.
-      if (UseSSE > 0) {
-#ifdef ASSERT
-        if (TraceLinearScanLevel >= 2) {
-          tty->print_cr("killing XMMs for trig");
-        }
-#endif
-        int num_caller_save_xmm_regs = FrameMap::get_num_caller_save_xmms();
-        int op_id = op->id();
-        for (int xmm = 0; xmm < num_caller_save_xmm_regs; xmm++) {
-          LIR_Opr opr = FrameMap::caller_save_xmm_reg_at(xmm);
-          add_temp(reg_num(opr), op_id, noUse, T_ILLEGAL);
-        }
-      }
-      break;
-    }
-    default:
-      break;
-  }
+  // No special case behaviours yet
 }
 
 
 // Implementation of LinearScanWalker
 
 inline bool LinearScanWalker::pd_init_regs_for_alloc(Interval* cur) {
-  int last_xmm_reg = pd_last_xmm_reg;
-#ifdef _LP64
-  if (UseAVX < 3) {
-    last_xmm_reg = pd_first_xmm_reg + (pd_nof_xmm_regs_frame_map / 2) - 1;
-  }
-#endif
+  int last_xmm_reg = pd_first_xmm_reg + XMMRegister::available_xmm_registers() - 1;
   if (allocator()->gen()->is_vreg_flag_set(cur->reg_num(), LIRGenerator::byte_reg)) {
     assert(cur->type() != T_FLOAT && cur->type() != T_DOUBLE, "cpu regs only");
     _first_reg = pd_first_byte_reg;

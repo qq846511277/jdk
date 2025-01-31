@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,15 +27,13 @@
 
 #include "code/codeBlob.hpp"
 #include "code/vmreg.hpp"
-#include "interpreter/bytecodeTracer.hpp"
 #include "interpreter/linkResolver.hpp"
-#include "memory/allocation.hpp"
+#include "memory/allStatic.hpp"
 #include "memory/resourceArea.hpp"
-#include "utilities/hashtable.hpp"
+#include "runtime/stubDeclarations.hpp"
 #include "utilities/macros.hpp"
 
 class AdapterHandlerEntry;
-class AdapterHandlerTable;
 class AdapterFingerPrint;
 class vframeStream;
 
@@ -45,34 +43,57 @@ class vframeStream;
 // Java exceptions), locking/unlocking mechanisms, statistical
 // information, etc.
 
+// define SharedStubId enum tags: wrong_method_id, etc
+
+#define SHARED_STUB_ID_ENUM_DECLARE(name, type) STUB_ID_NAME(name),
+enum class SharedStubId :int {
+  NO_STUBID = -1,
+  SHARED_STUBS_DO(SHARED_STUB_ID_ENUM_DECLARE)
+  NUM_STUBIDS
+};
+#undef SHARED_STUB_ID_ENUM_DECLARE
+
 class SharedRuntime: AllStatic {
   friend class VMStructs;
 
  private:
-  static bool resolve_sub_helper_internal(methodHandle callee_method, const frame& caller_frame,
-                                          CompiledMethod* caller_nm, bool is_virtual, bool is_optimized,
-                                          Handle receiver, CallInfo& call_info, Bytecodes::Code invoke_code, TRAPS);
-  static methodHandle resolve_sub_helper(bool is_virtual, bool is_optimized, TRAPS);
+  // Declare shared stub fields
+#define SHARED_STUB_FIELD_DECLARE(name, type) \
+  static type        BLOB_FIELD_NAME(name);
+  SHARED_STUBS_DO(SHARED_STUB_FIELD_DECLARE)
+#undef SHARED_STUB_FIELD_DECLARE
 
-  // Shared stub locations
+#ifdef ASSERT
+  static bool is_resolve_id(SharedStubId id) {
+    return (id == SharedStubId::wrong_method_id ||
+            id == SharedStubId::wrong_method_abstract_id ||
+            id == SharedStubId::ic_miss_id ||
+            id == SharedStubId::resolve_opt_virtual_call_id ||
+            id == SharedStubId::resolve_virtual_call_id ||
+            id == SharedStubId::resolve_static_call_id);
+  }
+  static bool is_polling_page_id(SharedStubId id) {
+    return (id == SharedStubId::polling_page_vectors_safepoint_handler_id ||
+            id == SharedStubId::polling_page_safepoint_handler_id ||
+            id == SharedStubId::polling_page_return_handler_id);
+  }
+  static bool is_throw_id(SharedStubId id) {
+    return (id == SharedStubId::throw_AbstractMethodError_id ||
+            id == SharedStubId::throw_IncompatibleClassChangeError_id ||
+            id == SharedStubId::throw_NullPointerException_at_call_id ||
+            id == SharedStubId::throw_StackOverflowError_id ||
+            id == SharedStubId::throw_delayed_StackOverflowError_id);
+  }
+#endif
 
-  static RuntimeStub*        _wrong_method_blob;
-  static RuntimeStub*        _wrong_method_abstract_blob;
-  static RuntimeStub*        _ic_miss_blob;
-  static RuntimeStub*        _resolve_opt_virtual_call_blob;
-  static RuntimeStub*        _resolve_virtual_call_blob;
-  static RuntimeStub*        _resolve_static_call_blob;
-  static address             _resolve_static_call_entry;
+  // cont_doYieldStub is not yet folded into the general model for
+  // shared stub/blob handling. It is actually a specially generated
+  // native wrapper for a specific native method, as also is it's
+  // counterpart the continuation do_enter method.
+  static nmethod*            _cont_doYield_stub;
 
-  static DeoptimizationBlob* _deopt_blob;
-
-  static SafepointBlob*      _polling_page_vectors_safepoint_handler_blob;
-  static SafepointBlob*      _polling_page_safepoint_handler_blob;
-  static SafepointBlob*      _polling_page_return_handler_blob;
-
-#ifdef COMPILER2
-  static UncommonTrapBlob*   _uncommon_trap_blob;
-#endif // COMPILER2
+  // Stub names indexed by SharedStubId
+  static const char *_stub_names[];
 
 #ifndef PRODUCT
   // Counters
@@ -80,12 +101,26 @@ class SharedRuntime: AllStatic {
 #endif // !PRODUCT
 
  private:
-  enum { POLL_AT_RETURN,  POLL_AT_LOOP, POLL_AT_VECTOR_LOOP };
-  static SafepointBlob* generate_handler_blob(address call_ptr, int poll_type);
-  static RuntimeStub*   generate_resolve_blob(address destination, const char* name);
-
+  static SafepointBlob* generate_handler_blob(SharedStubId id, address call_ptr);
+  static RuntimeStub*   generate_resolve_blob(SharedStubId id, address destination);
+  static RuntimeStub*   generate_throw_exception(SharedStubId id, address runtime_entry);
  public:
+  static void generate_initial_stubs(void);
   static void generate_stubs(void);
+#if INCLUDE_JFR
+  static void generate_jfr_stubs(void);
+  // For c2: c_rarg0 is junk, call to runtime to write a checkpoint.
+  // It returns a jobject handle to the event writer.
+  // The handle is dereferenced and the return value is the event writer oop.
+  static RuntimeStub* generate_jfr_write_checkpoint();
+  // For c2: call to runtime to return a buffer lease.
+  static RuntimeStub* generate_jfr_return_lease();
+#endif
+
+  static const char *stub_name(SharedStubId id) {
+    assert(id > SharedStubId::NO_STUBID && id < SharedStubId::NUM_STUBIDS, "stub id out of range");
+    return _stub_names[(int)id];
+  }
 
   // max bytes for each dtrace string parameter
   enum { max_dtrace_string_size = 256 };
@@ -129,9 +164,9 @@ class SharedRuntime: AllStatic {
   static jfloat  d2f (jdouble x);
   static jfloat  l2f (jlong   x);
   static jdouble l2d (jlong   x);
+  static jfloat  i2f (jint    x);
 
 #ifdef __SOFTFP__
-  static jfloat  i2f (jint    x);
   static jdouble i2d (jint    x);
   static jdouble f2d (jfloat  x);
 #endif // __SOFTFP__
@@ -185,7 +220,7 @@ class SharedRuntime: AllStatic {
   static address exception_handler_for_return_address(JavaThread* current, address return_address);
 
   // exception handling and implicit exceptions
-  static address compute_compiled_exc_handler(CompiledMethod* nm, address ret_pc, Handle& exception,
+  static address compute_compiled_exc_handler(nmethod* nm, address ret_pc, Handle& exception,
                                               bool force_unwind, bool top_frame_only, bool& recursive_exception_occurred);
   enum ImplicitExceptionKind {
     IMPLICIT_NULL,
@@ -215,41 +250,53 @@ class SharedRuntime: AllStatic {
   static address get_poll_stub(address pc);
 
   static address get_ic_miss_stub() {
-    assert(_ic_miss_blob!= NULL, "oops");
+    assert(_ic_miss_blob!= nullptr, "oops");
     return _ic_miss_blob->entry_point();
   }
 
   static address get_handle_wrong_method_stub() {
-    assert(_wrong_method_blob!= NULL, "oops");
+    assert(_wrong_method_blob!= nullptr, "oops");
     return _wrong_method_blob->entry_point();
   }
 
   static address get_handle_wrong_method_abstract_stub() {
-    assert(_wrong_method_abstract_blob!= NULL, "oops");
+    assert(_wrong_method_abstract_blob!= nullptr, "oops");
     return _wrong_method_abstract_blob->entry_point();
   }
 
-#ifdef COMPILER2
-  static void generate_uncommon_trap_blob(void);
-  static UncommonTrapBlob* uncommon_trap_blob()                  { return _uncommon_trap_blob; }
-#endif // COMPILER2
-
   static address get_resolve_opt_virtual_call_stub() {
-    assert(_resolve_opt_virtual_call_blob != NULL, "oops");
+    assert(_resolve_opt_virtual_call_blob != nullptr, "oops");
     return _resolve_opt_virtual_call_blob->entry_point();
   }
   static address get_resolve_virtual_call_stub() {
-    assert(_resolve_virtual_call_blob != NULL, "oops");
+    assert(_resolve_virtual_call_blob != nullptr, "oops");
     return _resolve_virtual_call_blob->entry_point();
   }
   static address get_resolve_static_call_stub() {
-    assert(_resolve_static_call_blob != NULL, "oops");
+    assert(_resolve_static_call_blob != nullptr, "oops");
     return _resolve_static_call_blob->entry_point();
   }
 
   static SafepointBlob* polling_page_return_handler_blob()     { return _polling_page_return_handler_blob; }
   static SafepointBlob* polling_page_safepoint_handler_blob()  { return _polling_page_safepoint_handler_blob; }
   static SafepointBlob* polling_page_vectors_safepoint_handler_blob()  { return _polling_page_vectors_safepoint_handler_blob; }
+
+  static nmethod* cont_doYield_stub() {
+    assert(_cont_doYield_stub != nullptr, "oops");
+    return _cont_doYield_stub;
+  }
+
+  // Implicit exceptions
+  static address throw_AbstractMethodError_entry()          { return _throw_AbstractMethodError_blob->entry_point(); }
+  static address throw_IncompatibleClassChangeError_entry() { return _throw_IncompatibleClassChangeError_blob->entry_point(); }
+  static address throw_NullPointerException_at_call_entry() { return _throw_NullPointerException_at_call_blob->entry_point(); }
+  static address throw_StackOverflowError_entry()           { return _throw_StackOverflowError_blob->entry_point(); }
+  static address throw_delayed_StackOverflowError_entry()   { return _throw_delayed_StackOverflowError_blob->entry_point(); }
+
+#if INCLUDE_JFR
+  static address jfr_write_checkpoint() { return _jfr_write_checkpoint_blob->entry_point(); }
+  static address jfr_return_lease()     { return _jfr_return_lease_blob->entry_point(); }
+#endif
 
   // Counters
 #ifndef PRODUCT
@@ -258,7 +305,15 @@ class SharedRuntime: AllStatic {
 
   // Helper routine for full-speed JVMTI exception throwing support
   static void throw_and_post_jvmti_exception(JavaThread* current, Handle h_exception);
-  static void throw_and_post_jvmti_exception(JavaThread* current, Symbol* name, const char *message = NULL);
+  static void throw_and_post_jvmti_exception(JavaThread* current, Symbol* name, const char *message = nullptr);
+
+#if INCLUDE_JVMTI
+  // Functions for JVMTI notifications
+  static void notify_jvmti_vthread_start(oopDesc* vt, jboolean hide, JavaThread* current);
+  static void notify_jvmti_vthread_end(oopDesc* vt, jboolean hide, JavaThread* current);
+  static void notify_jvmti_vthread_mount(oopDesc* vt, jboolean hide, JavaThread* current);
+  static void notify_jvmti_vthread_unmount(oopDesc* vt, jboolean hide, JavaThread* current);
+#endif
 
   // RedefineClasses() tracing support for obsolete method entry
   static int rc_trace_method_entry(JavaThread* thread, Method* m);
@@ -266,23 +321,21 @@ class SharedRuntime: AllStatic {
   // To be used as the entry point for unresolved native methods.
   static address native_method_throw_unsatisfied_link_error_entry();
 
-  static oop retrieve_receiver(Symbol* sig, frame caller);
-
   static void register_finalizer(JavaThread* thread, oopDesc* obj);
 
   // dtrace notifications
   static int dtrace_object_alloc(oopDesc* o);
-  static int dtrace_object_alloc(Thread* thread, oopDesc* o);
-  static int dtrace_object_alloc(Thread* thread, oopDesc* o, size_t size);
+  static int dtrace_object_alloc(JavaThread* thread, oopDesc* o);
+  static int dtrace_object_alloc(JavaThread* thread, oopDesc* o, size_t size);
   static int dtrace_method_entry(JavaThread* thread, Method* m);
   static int dtrace_method_exit(JavaThread* thread, Method* m);
 
   // Utility method for retrieving the Java thread id, returns 0 if the
   // thread is not a well formed Java thread.
-  static jlong get_java_tid(Thread* thread);
+  static jlong get_java_tid(JavaThread* thread);
 
 
-  // used by native wrappers to reenable yellow if overflow happened in native code
+  // used by native wrappers to re-enable yellow if overflow happened in native code
   static void reguard_yellow_pages();
 
   // Fill in the "X cannot be cast to a Y" message for ClassCastException
@@ -311,7 +364,7 @@ class SharedRuntime: AllStatic {
   // The caller (or one of it's callers) must use a ResourceMark
   // in order to correctly free the result.
   //
-  static char* generate_class_cast_message(Klass* caster_klass, Klass* target_klass, Symbol* target_klass_name = NULL);
+  static char* generate_class_cast_message(Klass* caster_klass, Klass* target_klass, Symbol* target_klass_name = nullptr);
 
   // Resolves a call site- may patch in the destination of the call into the
   // compiled code.
@@ -321,7 +374,7 @@ class SharedRuntime: AllStatic {
   // deopt blob
   static void generate_deopt_blob(void);
 
-  static bool handle_ic_miss_helper_internal(Handle receiver, CompiledMethod* caller_nm, const frame& caller_frame,
+  static bool handle_ic_miss_helper_internal(Handle receiver, nmethod* caller_nm, const frame& caller_frame,
                                              methodHandle callee_method, Bytecodes::Code bc, CallInfo& call_info,
                                              bool& needs_ic_stub_refill, TRAPS);
 
@@ -341,6 +394,9 @@ class SharedRuntime: AllStatic {
   static void monitor_enter_helper(oopDesc* obj, BasicLock* lock, JavaThread* thread);
 
   static void monitor_exit_helper(oopDesc* obj, BasicLock* lock, JavaThread* current);
+
+  // Issue UL warning for unlocked JNI monitor on virtual thread termination
+  static void log_jni_monitor_still_held();
 
  private:
   static Handle find_callee_info(Bytecodes::Code& bc, CallInfo& callinfo, TRAPS);
@@ -375,10 +431,9 @@ class SharedRuntime: AllStatic {
   // Some architectures require that an argument must be passed in a register
   // AND in a stack slot. These architectures provide a second VMRegPair array
   // to be filled by the c_calling_convention method. On other architectures,
-  // NULL is being passed as the second VMRegPair array, so arguments are either
+  // null is being passed as the second VMRegPair array, so arguments are either
   // passed in a register OR in a stack slot.
-  static int c_calling_convention(const BasicType *sig_bt, VMRegPair *regs, VMRegPair *regs2,
-                                  int total_args_passed);
+  static int c_calling_convention(const BasicType *sig_bt, VMRegPair *regs, int total_args_passed);
 
   static int vector_calling_convention(VMRegPair *regs,
                                        uint num_bits,
@@ -457,6 +512,10 @@ class SharedRuntime: AllStatic {
   // On PowerPC it includes the 4 words holding the old TOC & LR glue.
   static uint in_preserve_stack_slots();
 
+  static VMReg thread_register();
+
+  static void continuation_enter_cleanup(MacroAssembler* masm);
+
   // Is vector's size (in bytes) bigger than a size saved by default?
   // For example, on x86 16 bytes XMM registers are saved by default.
   static bool is_wide_vector(int size);
@@ -490,6 +549,7 @@ class SharedRuntime: AllStatic {
   static void complete_monitor_unlocking_C(oopDesc* obj, BasicLock* lock, JavaThread* current);
 
   // Resolving of calls
+  static address get_resolved_entry        (JavaThread* current, methodHandle callee_method);
   static address resolve_static_call_C     (JavaThread* current);
   static address resolve_virtual_call_C    (JavaThread* current);
   static address resolve_opt_virtual_call_C(JavaThread* current);
@@ -500,25 +560,12 @@ class SharedRuntime: AllStatic {
                                jint length, JavaThread* thread);
 
   // handle ic miss with caller being compiled code
-  // wrong method handling (inline cache misses, zombie methods)
+  // wrong method handling (inline cache misses)
   static address handle_wrong_method(JavaThread* current);
   static address handle_wrong_method_abstract(JavaThread* current);
   static address handle_wrong_method_ic_miss(JavaThread* current);
 
   static address handle_unsafe_access(JavaThread* thread, address next_pc);
-
-#ifdef COMPILER2
-  static RuntimeStub* make_native_invoker(address call_target,
-                                          int shadow_space_bytes,
-                                          const GrowableArray<VMReg>& input_registers,
-                                          const GrowableArray<VMReg>& output_registers);
-#endif
-
-  static void compute_move_order(const BasicType* in_sig_bt,
-                                 int total_in_args, const VMRegPair* in_regs,
-                                 int total_out_args, VMRegPair* out_regs,
-                                 GrowableArray<int>& arg_order,
-                                 VMRegPair tmp_vmreg);
 
 #ifndef PRODUCT
 
@@ -531,63 +578,60 @@ class SharedRuntime: AllStatic {
   static void trace_ic_miss(address at);
 
  public:
-  static int _ic_miss_ctr;                       // total # of IC misses
-  static int _wrong_method_ctr;
-  static int _resolve_static_ctr;
-  static int _resolve_virtual_ctr;
-  static int _resolve_opt_virtual_ctr;
-  static int _implicit_null_throws;
-  static int _implicit_div0_throws;
+  static uint _ic_miss_ctr;                      // total # of IC misses
+  static uint _wrong_method_ctr;
+  static uint _resolve_static_ctr;
+  static uint _resolve_virtual_ctr;
+  static uint _resolve_opt_virtual_ctr;
+  static uint _implicit_null_throws;
+  static uint _implicit_div0_throws;
 
-  static int _jbyte_array_copy_ctr;        // Slow-path byte array copy
-  static int _jshort_array_copy_ctr;       // Slow-path short array copy
-  static int _jint_array_copy_ctr;         // Slow-path int array copy
-  static int _jlong_array_copy_ctr;        // Slow-path long array copy
-  static int _oop_array_copy_ctr;          // Slow-path oop array copy
-  static int _checkcast_array_copy_ctr;    // Slow-path oop array copy, with cast
-  static int _unsafe_array_copy_ctr;       // Slow-path includes alignment checks
-  static int _generic_array_copy_ctr;      // Slow-path includes type decoding
-  static int _slow_array_copy_ctr;         // Slow-path failed out to a method call
+  static uint _jbyte_array_copy_ctr;       // Slow-path byte array copy
+  static uint _jshort_array_copy_ctr;      // Slow-path short array copy
+  static uint _jint_array_copy_ctr;        // Slow-path int array copy
+  static uint _jlong_array_copy_ctr;       // Slow-path long array copy
+  static uint _oop_array_copy_ctr;         // Slow-path oop array copy
+  static uint _checkcast_array_copy_ctr;   // Slow-path oop array copy, with cast
+  static uint _unsafe_array_copy_ctr;      // Slow-path includes alignment checks
+  static uint _generic_array_copy_ctr;     // Slow-path includes type decoding
+  static uint _slow_array_copy_ctr;        // Slow-path failed out to a method call
 
-  static int _new_instance_ctr;            // 'new' object requires GC
-  static int _new_array_ctr;               // 'new' array requires GC
-  static int _multi2_ctr, _multi3_ctr, _multi4_ctr, _multi5_ctr;
-  static int _find_handler_ctr;            // find exception handler
-  static int _rethrow_ctr;                 // rethrow exception
-  static int _mon_enter_stub_ctr;          // monitor enter stub
-  static int _mon_exit_stub_ctr;           // monitor exit stub
-  static int _mon_enter_ctr;               // monitor enter slow
-  static int _mon_exit_ctr;                // monitor exit slow
-  static int _partial_subtype_ctr;         // SubRoutines::partial_subtype_check
+  static uint _unsafe_set_memory_ctr;      // Slow-path includes alignment checks
+
+  static uint _new_instance_ctr;           // 'new' object requires GC
+  static uint _new_array_ctr;              // 'new' array requires GC
+  static uint _multi2_ctr, _multi3_ctr, _multi4_ctr, _multi5_ctr;
+  static uint _find_handler_ctr;           // find exception handler
+  static uint _rethrow_ctr;                // rethrow exception
+  static uint _mon_enter_stub_ctr;         // monitor enter stub
+  static uint _mon_exit_stub_ctr;          // monitor exit stub
+  static uint _mon_enter_ctr;              // monitor enter slow
+  static uint _mon_exit_ctr;               // monitor exit slow
+  static uint _partial_subtype_ctr;        // SubRoutines::partial_subtype_check
 
   // Statistics code
   // stats for "normal" compiled calls (non-interface)
   static int64_t _nof_normal_calls;               // total # of calls
-  static int64_t _nof_optimized_calls;            // total # of statically-bound calls
   static int64_t _nof_inlined_calls;              // total # of inlined normal calls
   static int64_t _nof_static_calls;               // total # of calls to static methods or super methods (invokespecial)
   static int64_t _nof_inlined_static_calls;       // total # of inlined static calls
   // stats for compiled interface calls
   static int64_t _nof_interface_calls;            // total # of compiled calls
-  static int64_t _nof_optimized_interface_calls;  // total # of statically-bound interface calls
   static int64_t _nof_inlined_interface_calls;    // total # of inlined interface calls
-  static int64_t _nof_megamorphic_interface_calls;// total # of megamorphic interface calls
 
  public: // for compiler
   static address nof_normal_calls_addr()                { return (address)&_nof_normal_calls; }
-  static address nof_optimized_calls_addr()             { return (address)&_nof_optimized_calls; }
   static address nof_inlined_calls_addr()               { return (address)&_nof_inlined_calls; }
   static address nof_static_calls_addr()                { return (address)&_nof_static_calls; }
   static address nof_inlined_static_calls_addr()        { return (address)&_nof_inlined_static_calls; }
   static address nof_interface_calls_addr()             { return (address)&_nof_interface_calls; }
-  static address nof_optimized_interface_calls_addr()   { return (address)&_nof_optimized_interface_calls; }
   static address nof_inlined_interface_calls_addr()     { return (address)&_nof_inlined_interface_calls; }
-  static address nof_megamorphic_interface_calls_addr() { return (address)&_nof_megamorphic_interface_calls; }
   static void print_call_statistics(uint64_t comp_total);
-  static void print_statistics();
   static void print_ic_miss_histogram();
 
 #endif // PRODUCT
+
+  static void print_statistics() PRODUCT_RETURN;
 };
 
 
@@ -624,8 +668,7 @@ class SharedRuntime: AllStatic {
 // used by the adapters.  The code generation happens here because it's very
 // similar to what the adapters have to do.
 
-class AdapterHandlerEntry : public BasicHashtableEntry<mtCode> {
-  friend class AdapterHandlerTable;
+class AdapterHandlerEntry : public CHeapObj<mtCode> {
   friend class AdapterHandlerLibrary;
 
  private:
@@ -642,21 +685,20 @@ class AdapterHandlerEntry : public BasicHashtableEntry<mtCode> {
   int            _saved_code_length;
 #endif
 
-  void init(AdapterFingerPrint* fingerprint, address i2c_entry, address c2i_entry, address c2i_unverified_entry, address c2i_no_clinit_check_entry) {
-    _fingerprint = fingerprint;
-    _i2c_entry = i2c_entry;
-    _c2i_entry = c2i_entry;
-    _c2i_unverified_entry = c2i_unverified_entry;
-    _c2i_no_clinit_check_entry = c2i_no_clinit_check_entry;
+  AdapterHandlerEntry(AdapterFingerPrint* fingerprint, address i2c_entry, address c2i_entry,
+                      address c2i_unverified_entry,
+                      address c2i_no_clinit_check_entry) :
+    _fingerprint(fingerprint),
+    _i2c_entry(i2c_entry),
+    _c2i_entry(c2i_entry),
+    _c2i_unverified_entry(c2i_unverified_entry),
+    _c2i_no_clinit_check_entry(c2i_no_clinit_check_entry)
 #ifdef ASSERT
-    _saved_code_length = 0;
+    , _saved_code_length(0)
 #endif
-  }
+  { }
 
-  void deallocate();
-
-  // should never be used
-  AdapterHandlerEntry();
+  ~AdapterHandlerEntry();
 
  public:
   address get_i2c_entry()                  const { return _i2c_entry; }
@@ -668,10 +710,6 @@ class AdapterHandlerEntry : public BasicHashtableEntry<mtCode> {
   void relocate(address new_base);
 
   AdapterFingerPrint* fingerprint() const { return _fingerprint; }
-
-  AdapterHandlerEntry* next() {
-    return (AdapterHandlerEntry*)BasicHashtableEntry<mtCode>::next();
-  }
 
 #ifdef ASSERT
   // Used to verify that code generated for shared adapters is equivalent
@@ -687,7 +725,6 @@ class AdapterHandlerLibrary: public AllStatic {
   friend class SharedRuntime;
  private:
   static BufferBlob* _buffer; // the temporary code buffer in CodeCache
-  static AdapterHandlerTable* _adapters;
   static AdapterHandlerEntry* _abstract_method_handler;
   static AdapterHandlerEntry* _no_arg_handler;
   static AdapterHandlerEntry* _int_arg_handler;
@@ -708,7 +745,7 @@ class AdapterHandlerLibrary: public AllStatic {
                                         address i2c_entry,
                                         address c2i_entry,
                                         address c2i_unverified_entry,
-                                        address c2i_no_clinit_check_entry = NULL);
+                                        address c2i_no_clinit_check_entry = nullptr);
   static void create_native_wrapper(const methodHandle& method);
   static AdapterHandlerEntry* get_adapter(const methodHandle& method);
 

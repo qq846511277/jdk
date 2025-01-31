@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "c1/c1_FrameMap.hpp"
 #include "c1/c1_LIR.hpp"
 #include "runtime/sharedRuntime.hpp"
@@ -146,7 +145,7 @@ LIR_Opr FrameMap::_caller_save_cpu_regs[] = {};
 LIR_Opr FrameMap::_caller_save_fpu_regs[] = {};
 LIR_Opr FrameMap::_caller_save_xmm_regs[] = {};
 
-XMMRegister FrameMap::_xmm_regs [] = { 0, };
+XMMRegister FrameMap::_xmm_regs[] = {};
 
 XMMRegister FrameMap::nr2xmmreg(int rnr) {
   assert(_init_done, "tables not initialized");

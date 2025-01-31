@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -21,6 +21,11 @@
 # questions.
 #
 
+# All tests
+
+all = \
+  :hotspot_all
+
 hotspot_all = \
   /
 
@@ -28,16 +33,13 @@ hotspot_all_no_apps = \
   / \
   -applications
 
+# Component test groups
+
 hotspot_compiler = \
   compiler
 
-hotspot_compiler_xcomp = \
-  :hotspot_compiler \
-  -:tier1_compiler_not_xcomp
-
-hotspot_compiler_all_gcs = \
-  :hotspot_compiler \
-  -compiler/jvmci
+hotspot_compiler_resourcehogs = \
+  resourcehogs/compiler
 
 hotspot_gc = \
   gc
@@ -45,6 +47,14 @@ hotspot_gc = \
 # By design this group should include ALL tests under runtime sub-directory
 hotspot_runtime = \
   runtime
+
+hotspot_runtime_no_cds = \
+  runtime \
+  -runtime/cds
+
+hotspot_runtime_non_cds_mode = \
+  runtime \
+  -runtime/cds
 
 hotspot_handshake = \
   runtime/handshake
@@ -80,6 +90,7 @@ hotspot_containers_extended = \
 
 hotspot_vector_1 = \
   compiler/c2/cr6340864 \
+  compiler/c2/irTests \
   compiler/codegen \
   compiler/loopopts/superword \
   compiler/vectorapi \
@@ -104,18 +115,42 @@ hotspot_vector_2 = \
 hotspot_compiler_arraycopy = \
   compiler/arraycopy/stress
 
+tier1_loom = \
+  :tier1_loom_runtime \
+  :tier1_loom_serviceability
+
+tier1_loom_runtime = \
+  runtime/vthread \
+  runtime/jni/IsVirtualThread
+
+tier1_loom_serviceability = \
+  serviceability/jvmti/vthread \
+  serviceability/jvmti/events \
+  serviceability/dcmd/thread
+
+hotspot_loom = \
+  :tier1_loom
+
+serviceability_ttf_virtual = \
+  serviceability/ \
+  -serviceability/jvmti/vthread \
+  -serviceability/jvmti/thread  \
+  -serviceability/jvmti/events  \
+  -serviceability/jvmti/negative
+
 tier1_common = \
   sanity/BasicVMTest.java \
   gtest/GTestWrapper.java \
+  gtest/LockStackGtests.java \
   gtest/MetaspaceGtests.java \
   gtest/LargePageGtests.java \
   gtest/NMTGtests.java \
+  gtest/WindowsProcessorGroups.java
 
 tier1_compiler = \
   :tier1_compiler_1 \
   :tier1_compiler_2 \
-  :tier1_compiler_3 \
-  :tier1_compiler_not_xcomp
+  :tier1_compiler_3
 
 hotspot_not_fast_compiler = \
   :hotspot_compiler \
@@ -126,6 +161,8 @@ hotspot_slow_compiler = \
   compiler/codegen/aes \
   compiler/codecache/stress \
   compiler/gcbarriers/PreserveFPRegistersTest.java \
+  compiler/memoryinitialization/ZeroTLABTest.java \
+  compiler/classUnloading/methodUnloading/TestOverloadCompileQueues.java \
   :hotspot_compiler_arraycopy
 
 tier1_compiler_1 = \
@@ -170,6 +207,7 @@ tier1_compiler_3 = \
   compiler/macronodes/ \
   compiler/memoryinitialization/ \
   compiler/osr/ \
+  compiler/profiling \
   compiler/regalloc/ \
   compiler/runtime/ \
   compiler/startup/ \
@@ -207,7 +245,6 @@ tier2_compiler = \
   compiler/parsing/ \
   compiler/rangechecks/ \
   compiler/reflection/ \
-  compiler/rtm/ \
   compiler/runtime/Test6826736.java \
   compiler/stable/ \
   compiler/stringopts/ \
@@ -215,22 +252,9 @@ tier2_compiler = \
   -:hotspot_slow_compiler
 
 tier3_compiler = \
-  compiler/c2/ \
-  compiler/ciReplay/ \
-  compiler/compilercontrol/ \
-  compiler/debug/ \
-  compiler/oracle/ \
-  compiler/print/ \
-  compiler/relocations/ \
-  compiler/tiered/ \
-  compiler/vectorapi/ \
-  compiler/whitebox/ \
-  :hotspot_slow_compiler \
+  :hotspot_compiler \
   -:tier1_compiler \
   -:tier2_compiler
-
-tier1_compiler_not_xcomp = \
-  compiler/profiling
 
 ctw_1 = \
   applications/ctw/modules/ \
@@ -249,10 +273,12 @@ ctw_3 = \
   applications/ctw/modules/jdk_localedata.java \
   applications/ctw/modules/jdk_localedata_2.java
 
+tier2_ctw = \
+  :ctw_1
+
 tier1_gc = \
   :tier1_gc_1 \
   :tier1_gc_2 \
-  :tier1_gc_gcold \
   :tier1_gc_gcbasher \
   :tier1_gc_epsilon \
   :tier1_gc_shenandoah
@@ -283,7 +309,7 @@ tier1_gc_epsilon = \
 
 tier2_gc_epsilon =
 
-tier1_gc_gcold = \
+tier3_gc_gcold = \
   gc/stress/gcold/TestGCOldWithG1.java \
   gc/stress/gcold/TestGCOldWithSerial.java \
   gc/stress/gcold/TestGCOldWithParallel.java
@@ -315,7 +341,6 @@ tier2_gc_shenandoah = \
   gc/logging/TestMetaSpaceLog.java \
   gc/metaspace/TestMetaspacePerfCounters.java \
   gc/metaspace/TestMetaspacePerfCounters.java \
-  gc/startup_warnings/TestShenandoah.java \
   gc/TestFullGCALot.java \
   gc/logging/TestUnifiedLoggingSwitchStress.java \
   runtime/Metaspace/DefineClass.java \
@@ -327,7 +352,6 @@ tier2_gc_shenandoah = \
 tier3_gc_shenandoah = \
   gc/stress/gcold/TestGCOldWithShenandoah.java \
   gc/stress/gcbasher/TestGCBasherWithShenandoah.java \
-  gc/stress/gclocker/TestGCLockerWithShenandoah.java \
   gc/stress/systemgc/TestSystemGCWithShenandoah.java \
   gc/shenandoah/TestStringDedupStress.java \
   -:tier2_gc_shenandoah
@@ -347,6 +371,7 @@ tier1_runtime = \
  -runtime/CompressedOops/UseCompressedOops.java \
  -runtime/ConstantPool/IntfMethod.java \
  -runtime/ErrorHandling/CreateCoredumpOnCrash.java \
+ -runtime/ErrorHandling/ReattemptErrorTest.java \
  -runtime/ErrorHandling/TestHeapDumpOnOutOfMemoryError.java \
  -runtime/ErrorHandling/TimeoutInErrorHandlingTest.java \
  -runtime/InvocationTests \
@@ -354,12 +379,13 @@ tier1_runtime = \
  -runtime/memory/ReserveMemory.java \
  -runtime/Metaspace/FragmentMetaspace.java \
  -runtime/Metaspace/FragmentMetaspaceSimple.java \
- -runtime/Metaspace/elastic/TestMetaspaceAllocationMT1.java \
- -runtime/Metaspace/elastic/TestMetaspaceAllocationMT2.java \
  -runtime/MirrorFrame/Test8003720.java \
+ -runtime/Monitor/StressWrapper_TestRecursiveLocking_36M.java \
+ -runtime/Monitor/TestRecursiveLocking.java \
  -runtime/modules/LoadUnloadModuleStress.java \
  -runtime/modules/ModuleStress/ExportModuleStressTest.java \
  -runtime/modules/ModuleStress/ModuleStressGC.java \
+ -runtime/Monitor/ConcurrentDeflation.java \
  -runtime/ReservedStack \
  -runtime/SelectionResolution/AbstractMethodErrorTest.java \
  -runtime/SelectionResolution/IllegalAccessErrorTest.java \
@@ -378,39 +404,54 @@ tier1_runtime = \
  -runtime/Unsafe/RangeCheck.java \
   sanity/ \
  -:tier1_runtime_appcds_exclude \
- -runtime/signal
+ -runtime/signal \
+ -runtime/stack
 
 hotspot_cds = \
   runtime/cds/ \
   runtime/CompressedOops/
 
+hotspot_cds_only = \
+  runtime/cds/
 
 hotspot_appcds_dynamic = \
   runtime/cds/appcds/ \
+ -runtime/cds/appcds/applications \
  -runtime/cds/appcds/cacheObject \
+ -runtime/cds/appcds/complexURI \
  -runtime/cds/appcds/customLoader \
  -runtime/cds/appcds/dynamicArchive \
+ -runtime/cds/appcds/jigsaw/modulepath/ModulePathAndFMG.java \
+ -runtime/cds/appcds/jigsaw/modulepath/OptimizeModuleHandlingTest.java \
  -runtime/cds/appcds/loaderConstraints/DynamicLoaderConstraintsTest.java \
  -runtime/cds/appcds/javaldr/ArrayTest.java \
  -runtime/cds/appcds/javaldr/ExceptionDuringDumpAtObjectsInitPhase.java \
  -runtime/cds/appcds/javaldr/GCSharedStringsDuringDump.java \
- -runtime/cds/appcds/javaldr/HumongousDuringDump.java \
  -runtime/cds/appcds/javaldr/LockDuringDump.java \
  -runtime/cds/appcds/jcmd/JCmdTestStaticDump.java \
  -runtime/cds/appcds/jcmd/JCmdTestDynamicDump.java \
  -runtime/cds/appcds/jcmd/JCmdTestFileSafety.java \
+ -runtime/cds/appcds/jvmti/redefineClasses/OldClassAndRedefineClass.java \
+ -runtime/cds/appcds/lambdaForm/DefaultClassListLFInvokers.java \
  -runtime/cds/appcds/methodHandles \
+ -runtime/cds/appcds/aotClassLinking/BulkLoaderTest.java \
  -runtime/cds/appcds/sharedStrings \
+ -runtime/cds/appcds/resolvedConstants \
  -runtime/cds/appcds/ArchiveRelocationTest.java \
  -runtime/cds/appcds/BadBSM.java \
+ -runtime/cds/appcds/CommandLineFlagCombo.java \
  -runtime/cds/appcds/DumpClassList.java \
  -runtime/cds/appcds/DumpClassListWithLF.java \
+ -runtime/cds/appcds/DumpRuntimeClassesTest.java \
+ -runtime/cds/appcds/DumpingWithNoCoops.java \
  -runtime/cds/appcds/ExtraSymbols.java \
  -runtime/cds/appcds/LambdaContainsOldInf.java \
  -runtime/cds/appcds/LambdaEagerInit.java \
+ -runtime/cds/appcds/LambdaInvokeVirtual.java \
  -runtime/cds/appcds/LambdaProxyClasslist.java \
  -runtime/cds/appcds/LambdaVerificationFailedDuringDump.java \
  -runtime/cds/appcds/LambdaWithJavaAgent.java \
+ -runtime/cds/appcds/LambdaWithUseImplMethodHandle.java \
  -runtime/cds/appcds/LambdaWithOldClass.java \
  -runtime/cds/appcds/LongClassListPath.java \
  -runtime/cds/appcds/LotsOfClasses.java \
@@ -421,6 +462,7 @@ hotspot_appcds_dynamic = \
  -runtime/cds/appcds/StaticArchiveWithLambda.java \
  -runtime/cds/appcds/TestCombinedCompressedFlags.java \
  -runtime/cds/appcds/TestEpsilonGCWithCDS.java \
+ -runtime/cds/appcds/TestParallelGCWithCDS.java \
  -runtime/cds/appcds/TestSerialGCWithCDS.java \
  -runtime/cds/appcds/TestZGCWithCDS.java \
  -runtime/cds/appcds/UnusedCPDuringDump.java \
@@ -434,6 +476,7 @@ hotspot_cds_relocation = \
   runtime/modules/PatchModule/PatchModuleClassList.java \
   runtime/NMT \
   serviceability/sa \
+ -serviceability/sa/TestJhsdbJstackPrintVMLocks.java \
  -runtime/cds/DeterministicDump.java
 
 hotspot_cds_verify_shared_spaces = \
@@ -466,6 +509,74 @@ hotspot_cds_epsilongc = \
   runtime/cds/appcds/jigsaw \
   runtime/cds/appcds/loaderConstraints
 
+# Run CDS tests with -XX:+AOTClassLinking. This should include most CDS tests, except for
+# those that rely on redefining classes that are already archived.
+hotspot_aot_classlinking = \
+  runtime/cds \
+ -runtime/cds/appcds/aotClassLinking \
+ -runtime/cds/appcds/BadBSM.java \
+ -runtime/cds/appcds/cacheObject/ArchivedIntegerCacheTest.java \
+ -runtime/cds/appcds/cacheObject/ArchivedModuleCompareTest.java \
+ -runtime/cds/appcds/CDSandJFR.java \
+ -runtime/cds/appcds/customLoader/CustomClassListDump.java \
+ -runtime/cds/appcds/customLoader/HelloCustom_JFR.java \
+ -runtime/cds/appcds/customLoader/OldClassAndInf.java \
+ -runtime/cds/appcds/customLoader/ParallelTestMultiFP.java \
+ -runtime/cds/appcds/customLoader/ParallelTestSingleFP.java \
+ -runtime/cds/appcds/customLoader/SameNameInTwoLoadersTest.java \
+ -runtime/cds/appcds/DumpClassListWithLF.java \
+ -runtime/cds/appcds/dynamicArchive/ModulePath.java \
+ -runtime/cds/appcds/dynamicArchive/LambdaCustomLoader.java \
+ -runtime/cds/appcds/dynamicArchive/LambdaForOldInfInBaseArchive.java \
+ -runtime/cds/appcds/dynamicArchive/LambdaInBaseArchive.java \
+ -runtime/cds/appcds/dynamicArchive/LambdasInTwoArchives.java \
+ -runtime/cds/appcds/dynamicArchive/OldClassAndInf.java \
+ -runtime/cds/appcds/dynamicArchive/OldClassInBaseArchive.java \
+ -runtime/cds/appcds/dynamicArchive/OldClassVerifierTrouble.java \
+ -runtime/cds/appcds/HelloExtTest.java \
+ -runtime/cds/appcds/javaldr/GCDuringDump.java \
+ -runtime/cds/appcds/javaldr/LockDuringDump.java \
+ -runtime/cds/appcds/jigsaw/classpathtests/EmptyClassInBootClassPath.java \
+ -runtime/cds/appcds/jigsaw/JigsawOptionsCombo.java \
+ -runtime/cds/appcds/jigsaw/modulepath/AddOpens.java \
+ -runtime/cds/appcds/jigsaw/modulepath/AddModules.java \
+ -runtime/cds/appcds/jigsaw/modulepath/JvmtiAddPath.java \
+ -runtime/cds/appcds/jigsaw/modulepath/MainModuleOnly.java \
+ -runtime/cds/appcds/jigsaw/modulepath/ModulePathAndCP.java \
+ -runtime/cds/appcds/jigsaw/modulepath/ModulePathAndCP_JFR.java \
+ -runtime/cds/appcds/jigsaw/modulepath/ModulePathAndFMG.java \
+ -runtime/cds/appcds/jigsaw/modulepath/OptimizeModuleHandlingTest.java \
+ -runtime/cds/appcds/jigsaw/overridetests/OverrideTests.java \
+ -runtime/cds/appcds/jigsaw/RedefineClassesInModuleGraph.java \
+ -runtime/cds/appcds/JvmtiAddPath.java \
+ -runtime/cds/appcds/jvmti \
+ -runtime/cds/appcds/LambdaProxyClasslist.java \
+ -runtime/cds/appcds/loaderConstraints/LoaderConstraintsTest.java \
+ -runtime/cds/appcds/NestHostOldInf.java \
+ -runtime/cds/appcds/OldClassTest.java \
+ -runtime/cds/appcds/OldClassWithjsr.java \
+ -runtime/cds/appcds/OldInfExtendsInfDefMeth.java \
+ -runtime/cds/appcds/OldSuperClass.java \
+ -runtime/cds/appcds/OldSuperInfIndirect.java \
+ -runtime/cds/appcds/OldSuperInf.java \
+ -runtime/cds/appcds/redefineClass \
+ -runtime/cds/appcds/resolvedConstants/AOTLinkedLambdas.java \
+ -runtime/cds/appcds/resolvedConstants/AOTLinkedVarHandles.java \
+ -runtime/cds/appcds/resolvedConstants/ResolvedConstants.java \
+ -runtime/cds/appcds/RewriteBytecodesTest.java \
+ -runtime/cds/appcds/SpecifySysLoaderProp.java \
+ -runtime/cds/appcds/StaticArchiveWithLambda.java \
+ -runtime/cds/appcds/TestEpsilonGCWithCDS.java \
+ -runtime/cds/appcds/TestParallelGCWithCDS.java \
+ -runtime/cds/appcds/TestSerialGCWithCDS.java \
+ -runtime/cds/appcds/TestZGCWithCDS.java \
+ -runtime/cds/appcds/TestWithProfiler.java \
+ -runtime/cds/serviceability/ReplaceCriticalClassesForSubgraphs.java \
+ -runtime/cds/serviceability/ReplaceCriticalClasses.java \
+ -runtime/cds/serviceability/transformRelatedClasses/TransformInterfaceAndImplementor.java \
+ -runtime/cds/serviceability/transformRelatedClasses/TransformSuperAndSubClasses.java \
+ -runtime/cds/serviceability/transformRelatedClasses/TransformSuperSubTwoPckgs.java
+
 # needs -nativepath:<output>/images/test/hotspot/jtreg/native/
 hotspot_metaspace = \
   gtest/MetaspaceGtests.java \
@@ -484,6 +595,10 @@ tier1_runtime_appcds = \
 tier1_runtime_appcds_exclude = \
   runtime/cds/appcds/ \
   -:tier1_runtime_appcds
+
+tier1_runtime_no_cds = \
+   :tier1_runtime \
+   -runtime/cds
 
 # This group should be executed with "jtreg -Dtest.cds.run.with.jfr=true ..."
 # to test interaction between AppCDS and JFR. It also has the side effect of
@@ -504,6 +619,7 @@ tier1_serviceability = \
   serviceability/ \
   -serviceability/dcmd/compiler/CompilerQueueTest.java \
   -serviceability/jvmti/RedefineClasses/RedefineLeak.java \
+  -serviceability/jvmti/RedefineClasses/RedefineLeakThrowable.java \
   -serviceability/jvmti/RedefineClasses/RedefinePreviousVersions.java \
   -serviceability/jvmti/RedefineClasses/RedefineRunningMethods.java \
   -serviceability/jvmti/RedefineClasses/RedefineRunningMethodsWithBacktrace.java \
@@ -525,12 +641,14 @@ tier2 = \
   :hotspot_tier2_runtime_platform_agnostic \
   :hotspot_tier2_serviceability \
   :tier2_compiler \
+  :tier2_ctw \
   :tier2_gc_epsilon \
   :tier2_gc_shenandoah
 
 tier3 = \
   :hotspot_tier3_runtime \
   :tier3_compiler \
+  :tier3_gc_gcold \
   :tier3_gc_shenandoah
 
 # Everything that is not in other tiers, but not apps
@@ -545,6 +663,7 @@ hotspot_tier2_runtime = \
  -runtime/CommandLine/OptionsValidation/TestOptionsWithRanges.java \
  -runtime/CompressedOops/UseCompressedOops.java \
  -runtime/InvocationTests \
+ -runtime/Monitor/StressWrapper_TestRecursiveLocking_36M.java \
  -runtime/Thread/TestThreadDumpMonitorContention.java \
  -:tier1_runtime \
  -:hotspot_tier2_runtime_platform_agnostic \
@@ -656,15 +775,11 @@ vmTestbase_vm_gc_container = \
 
 # Playing with object arrays and various strategies of garbage producing
 vmTestbase_vm_gc_juggle = \
-  vmTestbase/gc/ArrayJuggle/ \
-  vmTestbase/gc/memory/Array/ArrayJuggle
+  vmTestbase/gc/ArrayJuggle/
 
 # GC Locker
 vmTestbase_vm_gc_locker = \
   vmTestbase/gc/lock \
-  vmTestbase/gc/gctests/mallocWithGC1/mallocWithGC1.java \
-  vmTestbase/gc/gctests/mallocWithGC2/mallocWithGC2.java \
-  vmTestbase/gc/gctests/mallocWithGC3/mallocWithGC3.java \
   vmTestbase/gc/gctests/nativeGC01/nativeGC01.java \
   vmTestbase/gc/gctests/nativeGC02/nativeGC02.java \
   vmTestbase/gc/gctests/nativeGC03/nativeGC03.java \

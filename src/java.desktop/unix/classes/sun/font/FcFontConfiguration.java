@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -295,6 +295,16 @@ public class FcFontConfiguration extends FontConfiguration {
         return null;
     }
 
+    private String extractInfo(String s) {
+        if (s == null) {
+            return null;
+        }
+        if (s.startsWith("\"")) s = s.substring(1);
+        if (s.endsWith("\"")) s = s.substring(0, s.length()-1);
+        s = s.replace(' ', '_');
+        return s;
+    }
+
     /**
      * Sets the OS name and version from environment information.
      */
@@ -317,8 +327,8 @@ public class FcFontConfiguration extends FontConfiguration {
                     try (FileInputStream fis = new FileInputStream(f)) {
                         props.load(fis);
                     }
-                    osName = props.getProperty("DISTRIB_ID");
-                    osVersion =  props.getProperty("DISTRIB_RELEASE");
+                    osName = extractInfo(props.getProperty("DISTRIB_ID"));
+                    osVersion = extractInfo(props.getProperty("DISTRIB_RELEASE"));
             } else if ((f = new File("/etc/redhat-release")).canRead()) {
                 osName = "RedHat";
                 osVersion = getVersionString(f);
@@ -331,6 +341,18 @@ public class FcFontConfiguration extends FontConfiguration {
             } else if ((f = new File("/etc/fedora-release")).canRead()) {
                 osName = "Fedora";
                 osVersion = getVersionString(f);
+            } else if ((f = new File("/etc/os-release")).canRead()) {
+                Properties props = new Properties();
+                try (FileInputStream fis = new FileInputStream(f)) {
+                    props.load(fis);
+                }
+                osName = extractInfo(props.getProperty("NAME"));
+                osVersion = extractInfo(props.getProperty("VERSION_ID"));
+                if (osName.equals("SLES")) {
+                    osName = "SuSE";
+                } else {
+                    osName = extractInfo(props.getProperty("ID"));
+                }
             }
         } catch (Exception e) {
             if (FontUtilities.debugFonts()) {
@@ -341,11 +363,6 @@ public class FcFontConfiguration extends FontConfiguration {
 
     private File getFcInfoFile() {
         if (fcInfoFileName == null) {
-            // NB need security permissions to get true IP address, and
-            // we should have those as the whole initialisation is in a
-            // doPrivileged block. But in this case no exception is thrown,
-            // and it returns the loop back address, and so we end up with
-            // "localhost"
             String hostname;
             try {
                 hostname = InetAddress.getLocalHost().getHostName();

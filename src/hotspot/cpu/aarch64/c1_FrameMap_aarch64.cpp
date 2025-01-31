@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2014, Red Hat Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -23,7 +23,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "c1/c1_FrameMap.hpp"
 #include "c1/c1_LIR.hpp"
 #include "runtime/sharedRuntime.hpp"
@@ -300,8 +299,6 @@ void FrameMap::initialize() {
 
 
 Address FrameMap::make_new_address(ByteSize sp_offset) const {
-  // for rbp, based address use this:
-  // return Address(rbp, in_bytes(sp_offset) - (framesize() - 2) * 4);
   return Address(sp, in_bytes(sp_offset));
 }
 

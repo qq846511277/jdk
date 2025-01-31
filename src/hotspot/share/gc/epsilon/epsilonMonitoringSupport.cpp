@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "gc/epsilon/epsilonMonitoringSupport.hpp"
 #include "gc/epsilon/epsilonHeap.hpp"
 #include "gc/shared/generationCounters.hpp"
@@ -113,4 +112,3 @@ void EpsilonMonitoringSupport::update_counters() {
     MetaspaceCounters::update_performance_counters();
   }
 }
-

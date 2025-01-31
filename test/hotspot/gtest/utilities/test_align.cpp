@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,12 +21,12 @@
  * questions.
  */
 
-#include "precompiled.hpp"
 #include "utilities/align.hpp"
 #include "utilities/formatBuffer.hpp"
 #include "utilities/globalDefinitions.hpp"
-#include <limits>
 #include "unittest.hpp"
+
+#include <limits>
 
 // A few arbitrarily chosen values to test the align functions on.
 static constexpr uint64_t values[] = {1, 3, 10, 345, 1023, 1024, 1025, 23909034, INT_MAX, uint64_t(-1) / 2, uint64_t(-1) / 2 + 100, uint64_t(-1)};
@@ -103,7 +103,7 @@ static void static_test_alignments() {
 
 template <typename T, typename A>
 static void test_alignments() {
-  log("### Test: %c" SIZE_FORMAT " " UINT64_FORMAT " : %c" SIZE_FORMAT " " UINT64_FORMAT " ###\n",
+  log("### Test: %c%zu " UINT64_FORMAT " : %c%zu " UINT64_FORMAT " ###\n",
       std::numeric_limits<T>::is_signed ? 's' : 'u', sizeof(T), (uint64_t)std::numeric_limits<T>::max(),
       std::numeric_limits<A>::is_signed ? 's' : 'u', sizeof(A), (uint64_t)std::numeric_limits<A>::max());
 
@@ -117,7 +117,7 @@ static void test_alignments() {
       // Test align up
       const uint64_t up = align_up(values[i], alignment);
       if (0 < up && up <= (uint64_t)std::numeric_limits<T>::max()) {
-        log("Testing align_up:   alignment: 0x" UINT64_FORMAT_X " value: 0x" UINT64_FORMAT_X " expected: 0x" UINT64_FORMAT_X "\n", (uint64_t)alignment, values[i], up);
+        log("Testing align_up:   alignment: " UINT64_FORMAT_X " value: " UINT64_FORMAT_X " expected: " UINT64_FORMAT_X "\n", (uint64_t)alignment, values[i], up);
 
         T value = T(values[i]);
 
@@ -130,7 +130,7 @@ static void test_alignments() {
       // Test align down
       const uint64_t down = align_down(values[i], alignment);
       if (down <= (uint64_t)std::numeric_limits<T>::max()) {
-        log("Testing align_down: alignment: 0x" UINT64_FORMAT_X " value: 0x" UINT64_FORMAT_X " expected: 0x" UINT64_FORMAT_X "\n", (uint64_t)alignment, values[i], down);
+        log("Testing align_down: alignment: " UINT64_FORMAT_X " value: " UINT64_FORMAT_X " expected: " UINT64_FORMAT_X "\n", (uint64_t)alignment, values[i], down);
 
         T value = T(values[i]);
 
@@ -143,7 +143,7 @@ static void test_alignments() {
       // Test is aligned
       const bool is = is_aligned(values[i], alignment);
       if (values[i] <= (uint64_t)std::numeric_limits<T>::max()) {
-        log("Testing is_aligned: alignment: 0x" UINT64_FORMAT_X " value: 0x" UINT64_FORMAT_X " expected: %s\n", (uint64_t)alignment, values[i], is ? "true" : "false");
+        log("Testing is_aligned: alignment: " UINT64_FORMAT_X " value: " UINT64_FORMAT_X " expected: %s\n", (uint64_t)alignment, values[i], is ? "true" : "false");
 
         T value = T(values[i]);
 
