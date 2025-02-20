@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,21 +28,23 @@
 #include "cgroupSubsystem_linux.hpp"
 #include "cgroupV1Subsystem_linux.hpp"
 #include "cgroupV2Subsystem_linux.hpp"
+#include "cgroupUtil_linux.hpp"
 #include "logging/log.hpp"
 #include "memory/allocation.hpp"
+#include "os_linux.hpp"
 #include "runtime/globals.hpp"
 #include "runtime/os.hpp"
 #include "utilities/globalDefinitions.hpp"
 
 // controller names have to match the *_IDX indices
-static const char* cg_controller_name[] = { "cpu", "cpuset", "cpuacct", "memory", "pids" };
+static const char* cg_controller_name[] = { "cpuset", "cpu", "cpuacct", "memory", "pids" };
 
 CgroupSubsystem* CgroupSubsystemFactory::create() {
-  CgroupV1MemoryController* memory = NULL;
-  CgroupV1Controller* cpuset = NULL;
-  CgroupV1Controller* cpu = NULL;
-  CgroupV1Controller* cpuacct = NULL;
-  CgroupV1Controller* pids = NULL;
+  CgroupV1MemoryController* memory = nullptr;
+  CgroupV1Controller* cpuset = nullptr;
+  CgroupV1CpuController* cpu = nullptr;
+  CgroupV1Controller* cpuacct = nullptr;
+  CgroupV1Controller* pids = nullptr;
   CgroupInfo cg_infos[CG_INFO_LENGTH];
   u1 cg_type_flags = INVALID_CGROUPS_GENERIC;
   const char* proc_cgroups = "/proc/cgroups";
@@ -53,19 +55,25 @@ CgroupSubsystem* CgroupSubsystemFactory::create() {
 
   if (!valid_cgroup) {
     // Could not detect cgroup type
-    return NULL;
+    return nullptr;
   }
   assert(is_valid_cgroup(&cg_type_flags), "Expected valid cgroup type");
 
   if (is_cgroup_v2(&cg_type_flags)) {
     // Cgroups v2 case, we have all the info we need.
     // Construct the subsystem, free resources and return
-    // Note: any index in cg_infos will do as the path is the same for
-    //       all controllers.
-    CgroupController* unified = new CgroupV2Controller(cg_infos[MEMORY_IDX]._mount_path, cg_infos[MEMORY_IDX]._cgroup_path);
+    // Note: We use the memory for non-cpu non-memory controller look-ups.
+    //       Perhaps we ought to have separate controllers for all.
+    CgroupV2Controller mem_other = CgroupV2Controller(cg_infos[MEMORY_IDX]._mount_path,
+                                                      cg_infos[MEMORY_IDX]._cgroup_path,
+                                                      cg_infos[MEMORY_IDX]._read_only);
+    CgroupV2MemoryController* memory = new CgroupV2MemoryController(mem_other);
+    CgroupV2CpuController* cpu = new CgroupV2CpuController(CgroupV2Controller(cg_infos[CPU_IDX]._mount_path,
+                                                                              cg_infos[CPU_IDX]._cgroup_path,
+                                                                              cg_infos[CPU_IDX]._read_only));
     log_debug(os, container)("Detected cgroups v2 unified hierarchy");
     cleanup(cg_infos);
-    return new CgroupV2Subsystem(unified);
+    return new CgroupV2Subsystem(memory, cpu, mem_other);
   }
 
   /*
@@ -99,19 +107,19 @@ CgroupSubsystem* CgroupSubsystemFactory::create() {
     CgroupInfo info = cg_infos[i];
     if (info._data_complete) { // pids controller might have incomplete data
       if (strcmp(info._name, "memory") == 0) {
-        memory = new CgroupV1MemoryController(info._root_mount_path, info._mount_path);
+        memory = new CgroupV1MemoryController(CgroupV1Controller(info._root_mount_path, info._mount_path, info._read_only));
         memory->set_subsystem_path(info._cgroup_path);
       } else if (strcmp(info._name, "cpuset") == 0) {
-        cpuset = new CgroupV1Controller(info._root_mount_path, info._mount_path);
+        cpuset = new CgroupV1Controller(info._root_mount_path, info._mount_path, info._read_only);
         cpuset->set_subsystem_path(info._cgroup_path);
       } else if (strcmp(info._name, "cpu") == 0) {
-        cpu = new CgroupV1Controller(info._root_mount_path, info._mount_path);
+        cpu = new CgroupV1CpuController(CgroupV1Controller(info._root_mount_path, info._mount_path, info._read_only));
         cpu->set_subsystem_path(info._cgroup_path);
       } else if (strcmp(info._name, "cpuacct") == 0) {
-        cpuacct = new CgroupV1Controller(info._root_mount_path, info._mount_path);
+        cpuacct = new CgroupV1Controller(info._root_mount_path, info._mount_path, info._read_only);
         cpuacct->set_subsystem_path(info._cgroup_path);
       } else if (strcmp(info._name, "pids") == 0) {
-        pids = new CgroupV1Controller(info._root_mount_path, info._mount_path);
+        pids = new CgroupV1Controller(info._root_mount_path, info._mount_path, info._read_only);
         pids->set_subsystem_path(info._cgroup_path);
       }
     } else {
@@ -122,20 +130,106 @@ CgroupSubsystem* CgroupSubsystemFactory::create() {
   return new CgroupV1Subsystem(cpuset, cpu, cpuacct, pids, memory);
 }
 
+void CgroupSubsystemFactory::set_controller_paths(CgroupInfo* cg_infos,
+                                                  int controller,
+                                                  const char* name,
+                                                  char* mount_path,
+                                                  char* root_path,
+                                                  bool read_only) {
+  if (cg_infos[controller]._mount_path != nullptr) {
+    // On some systems duplicate controllers get mounted in addition to
+    // the main cgroup controllers most likely under /sys/fs/cgroup. In that
+    // case pick the one under /sys/fs/cgroup and discard others.
+    if (strstr(cg_infos[controller]._mount_path, "/sys/fs/cgroup") != cg_infos[controller]._mount_path) {
+      log_debug(os, container)("Duplicate %s controllers detected. Picking %s, skipping %s.",
+                               name, mount_path, cg_infos[controller]._mount_path);
+      os::free(cg_infos[controller]._mount_path);
+      os::free(cg_infos[controller]._root_mount_path);
+      cg_infos[controller]._mount_path = os::strdup(mount_path);
+      cg_infos[controller]._root_mount_path = os::strdup(root_path);
+      cg_infos[controller]._read_only = read_only;
+    } else {
+      log_debug(os, container)("Duplicate %s controllers detected. Picking %s, skipping %s.",
+                               name, cg_infos[controller]._mount_path, mount_path);
+    }
+  } else {
+    cg_infos[controller]._mount_path = os::strdup(mount_path);
+    cg_infos[controller]._root_mount_path = os::strdup(root_path);
+    cg_infos[controller]._read_only = read_only;
+  }
+}
+
+/*
+ * Determine whether or not the mount options, which are comma separated,
+ * contain the 'ro' string.
+ */
+static bool find_ro_opt(char* mount_opts) {
+  char* token;
+  char* mo_ptr = mount_opts;
+  // mount options are comma-separated (man proc).
+  while ((token = strsep(&mo_ptr, ",")) != nullptr) {
+    if (strcmp(token, "ro") == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/*
+ * Read values of a /proc/self/mountinfo line into variables. For cgroups v1
+ * super options are needed. On cgroups v2 super options are not used.
+ *
+ * The scanning of a single mountinfo line entry is as follows:
+ *
+ * 36  35  98:0      /mnt1 /mnt2 rw,noatime master:1 - ext3 /dev/root rw,errors=continue
+ * (1) (2) (3):(4)   (5)   (6)      (7)      (8)   (9) (10)   (11)         (12)
+ *
+ * The numbers in parentheses are labels for the descriptions below:
+ *
+ *  (1)   mount ID:        matched with '%*d' and discarded
+ *  (2)   parent ID:       matched with '%*d' and discarded
+ *  (3)   major:           ---,---> major, minor separated by ':'. matched with '%*d:%*d' and discarded
+ *  (4)   minor:           ---'
+ *  (5)   root:            matched with '%s' and captured in 'tmproot'. Must be non-empty.
+ *  (6)   mount point:     matched with '%s' and captured in 'tmpmount'. Must be non-empty.
+ *  (7)   mount options:   matched with '%s' and captured in 'mount_opts'. Must be non-empty.
+ *  (8)   optional fields: ---,---> matched with '%*[^-]-'. Anything not a hyphen, followed by a hyphen
+ *  (9)   separator:       ---'     and discarded. Note: The discarded match is space characters if there
+ *                                  are no optionals. Otherwise it includes the optional fields as well.
+ * (10)   filesystem type: matched with '%s' and captured in 'tmp_fs_type'
+ * (11)   mount source:    matched with '%*s' and discarded
+ * (12)   super options:   matched with '%s' and captured in 'tmpcgroups'
+ */
+static inline bool match_mount_info_line(char* line,
+                                         char* tmproot,
+                                         char* tmpmount,
+                                         char* mount_opts,
+                                         char* tmp_fs_type,
+                                         char* tmpcgroups) {
+ return sscanf(line,
+               "%*d %*d %*d:%*d %s %s %s%*[^-]- %s %*s %s",
+               tmproot,
+               tmpmount,
+               mount_opts,
+               tmp_fs_type,
+               tmpcgroups) == 5;
+}
+
 bool CgroupSubsystemFactory::determine_type(CgroupInfo* cg_infos,
                                             const char* proc_cgroups,
                                             const char* proc_self_cgroup,
                                             const char* proc_self_mountinfo,
                                             u1* flags) {
-  FILE *mntinfo = NULL;
-  FILE *cgroups = NULL;
-  FILE *cgroup = NULL;
+  FILE *mntinfo = nullptr;
+  FILE *cgroups = nullptr;
+  FILE *cgroup = nullptr;
   char buf[MAXPATHLEN+1];
   char *p;
   bool is_cgroupsV2;
-  // true iff all required controllers, memory, cpu, cpuset, cpuacct are enabled
+  // true iff all required controllers, memory, cpu, cpuacct are enabled
   // at the kernel level.
   // pids might not be enabled on older Linux distros (SLES 12.1, RHEL 7.1)
+  // cpuset might not be enabled on newer Linux distros (Fedora 41)
   bool all_required_controllers_enabled;
 
   /*
@@ -146,14 +240,14 @@ bool CgroupSubsystemFactory::determine_type(CgroupInfo* cg_infos,
    * Conversely, for cgroups v2 (unified hierarchy), cpu, cpuacct, cpuset, memory
    * controllers must have hierarchy ID 0 and the unified controller mounted.
    */
-  cgroups = fopen(proc_cgroups, "r");
-  if (cgroups == NULL) {
+  cgroups = os::fopen(proc_cgroups, "r");
+  if (cgroups == nullptr) {
     log_debug(os, container)("Can't open %s, %s", proc_cgroups, os::strerror(errno));
     *flags = INVALID_CGROUPS_GENERIC;
     return false;
   }
 
-  while ((p = fgets(buf, MAXPATHLEN, cgroups)) != NULL) {
+  while ((p = fgets(buf, MAXPATHLEN, cgroups)) != nullptr) {
     char name[MAXPATHLEN+1];
     int  hierarchy_id;
     int  enabled;
@@ -167,6 +261,7 @@ bool CgroupSubsystemFactory::determine_type(CgroupInfo* cg_infos,
       cg_infos[MEMORY_IDX]._hierarchy_id = hierarchy_id;
       cg_infos[MEMORY_IDX]._enabled = (enabled == 1);
     } else if (strcmp(name, "cpuset") == 0) {
+      log_debug(os, container)("Detected optional cpuset controller entry in %s", proc_cgroups);
       cg_infos[CPUSET_IDX]._name = os::strdup(name);
       cg_infos[CPUSET_IDX]._hierarchy_id = hierarchy_id;
       cg_infos[CPUSET_IDX]._enabled = (enabled == 1);
@@ -190,8 +285,8 @@ bool CgroupSubsystemFactory::determine_type(CgroupInfo* cg_infos,
   is_cgroupsV2 = true;
   all_required_controllers_enabled = true;
   for (int i = 0; i < CG_INFO_LENGTH; i++) {
-    // pids controller is optional. All other controllers are required
-    if (i != PIDS_IDX) {
+    // pids and cpuset controllers are optional. All other controllers are required
+    if (i != PIDS_IDX && i != CPUSET_IDX) {
       is_cgroupsV2 = is_cgroupsV2 && cg_infos[i]._hierarchy_id == 0;
       all_required_controllers_enabled = all_required_controllers_enabled && cg_infos[i]._enabled;
     }
@@ -214,8 +309,8 @@ bool CgroupSubsystemFactory::determine_type(CgroupInfo* cg_infos,
    *  - on a cgroups v1 system, collect info for mapping
    *    the host mount point to the local one via /proc/self/mountinfo below.
    */
-  cgroup = fopen(proc_self_cgroup, "r");
-  if (cgroup == NULL) {
+  cgroup = os::fopen(proc_self_cgroup, "r");
+  if (cgroup == nullptr) {
     log_debug(os, container)("Can't open %s, %s",
                              proc_self_cgroup, os::strerror(errno));
     cleanup(cg_infos);
@@ -223,7 +318,7 @@ bool CgroupSubsystemFactory::determine_type(CgroupInfo* cg_infos,
     return false;
   }
 
-  while ((p = fgets(buf, MAXPATHLEN, cgroup)) != NULL) {
+  while ((p = fgets(buf, MAXPATHLEN, cgroup)) != nullptr) {
     char *controllers;
     char *token;
     char *hierarchy_id_str;
@@ -236,11 +331,11 @@ bool CgroupSubsystemFactory::determine_type(CgroupInfo* cg_infos,
     controllers = strsep(&p, ":");
     cgroup_path = strsep(&p, "\n");
 
-    if (controllers == NULL) {
+    if (controllers == nullptr) {
       continue;
     }
 
-    while (!is_cgroupsV2 && (token = strsep(&controllers, ",")) != NULL) {
+    while (!is_cgroupsV2 && (token = strsep(&controllers, ",")) != nullptr) {
       if (strcmp(token, "memory") == 0) {
         assert(hierarchy_id == cg_infos[MEMORY_IDX]._hierarchy_id, "/proc/cgroups and /proc/self/cgroup hierarchy mismatch for memory");
         cg_infos[MEMORY_IDX]._cgroup_path = os::strdup(cgroup_path);
@@ -260,7 +355,13 @@ bool CgroupSubsystemFactory::determine_type(CgroupInfo* cg_infos,
       }
     }
     if (is_cgroupsV2) {
+      // On some systems we have mixed cgroups v1 and cgroups v2 controllers (e.g. freezer on cg1 and
+      // all relevant controllers on cg2). Only set the cgroup path when we see a hierarchy id of 0.
+      if (hierarchy_id != 0) {
+        continue;
+      }
       for (int i = 0; i < CG_INFO_LENGTH; i++) {
+        assert(cg_infos[i]._cgroup_path == nullptr, "cgroup path must only be set once");
         cg_infos[i]._cgroup_path = os::strdup(cgroup_path);
       }
     }
@@ -269,8 +370,8 @@ bool CgroupSubsystemFactory::determine_type(CgroupInfo* cg_infos,
 
   // Find various mount points by reading /proc/self/mountinfo
   // mountinfo format is documented at https://www.kernel.org/doc/Documentation/filesystems/proc.txt
-  mntinfo = fopen(proc_self_mountinfo, "r");
-  if (mntinfo == NULL) {
+  mntinfo = os::fopen(proc_self_mountinfo, "r");
+  if (mntinfo == nullptr) {
       log_debug(os, container)("Can't open %s, %s",
                                proc_self_mountinfo, os::strerror(errno));
       cleanup(cg_infos);
@@ -280,34 +381,45 @@ bool CgroupSubsystemFactory::determine_type(CgroupInfo* cg_infos,
 
   bool cgroupv2_mount_point_found = false;
   bool any_cgroup_mounts_found = false;
-  while ((p = fgets(buf, MAXPATHLEN, mntinfo)) != NULL) {
-    char tmp_mount_point[MAXPATHLEN+1];
+  while ((p = fgets(buf, MAXPATHLEN, mntinfo)) != nullptr) {
     char tmp_fs_type[MAXPATHLEN+1];
     char tmproot[MAXPATHLEN+1];
     char tmpmount[MAXPATHLEN+1];
     char tmpcgroups[MAXPATHLEN+1];
+    char mount_opts[MAXPATHLEN+1];
     char *cptr = tmpcgroups;
     char *token;
 
-    // Cgroup v2 relevant info. We only look for the _mount_path iff is_cgroupsV2 so
-    // as to avoid memory stomping of the _mount_path pointer later on in the cgroup v1
-    // block in the hybrid case.
-    //
-    if (is_cgroupsV2 && sscanf(p, "%*d %*d %*d:%*d %*s %s %*[^-]- %s %*s %*s", tmp_mount_point, tmp_fs_type) == 2) {
+    /* Cgroup v2 relevant info. We only look for the _mount_path iff is_cgroupsV2 so
+     * as to avoid memory stomping of the _mount_path pointer later on in the cgroup v1
+     * block in the hybrid case.
+     *
+     * We collect the read only mount option in the cgroup infos so as to have that
+     * info ready when determining is_containerized().
+     */
+    if (is_cgroupsV2 && match_mount_info_line(p,
+                                              tmproot,
+                                              tmpmount,
+                                              mount_opts,
+                                              tmp_fs_type,
+                                              tmpcgroups /* unused */)) {
       // we likely have an early match return (e.g. cgroup fs match), be sure we have cgroup2 as fstype
-      if (!cgroupv2_mount_point_found && strcmp("cgroup2", tmp_fs_type) == 0) {
+      if (strcmp("cgroup2", tmp_fs_type) == 0) {
         cgroupv2_mount_point_found = true;
         any_cgroup_mounts_found = true;
+        // For unified we only have a single line with cgroup2 fs type.
+        // Therefore use that option for all CG info structs.
+        bool ro_option = find_ro_opt(mount_opts);
         for (int i = 0; i < CG_INFO_LENGTH; i++) {
-          assert(cg_infos[i]._mount_path == NULL, "_mount_path memory stomping");
-          cg_infos[i]._mount_path = os::strdup(tmp_mount_point);
+          set_controller_paths(cg_infos, i, "(cg2, unified)", tmpmount, tmproot, ro_option);
         }
       }
     }
 
     /* Cgroup v1 relevant info
      *
-     * Find the cgroup mount point for memory, cpuset, cpu, cpuacct, pids
+     * Find the cgroup mount point for memory, cpuset, cpu, cpuacct, pids. For each controller
+     * determine whether or not they show up as mounted read only or not.
      *
      * Example for docker:
      * 219 214 0:29 /docker/7208cebd00fa5f2e342b1094f7bed87fa25661471a4637118e65f1c995be8a34 /sys/fs/cgroup/memory ro,nosuid,nodev,noexec,relatime - cgroup cgroup rw,memory
@@ -316,56 +428,38 @@ bool CgroupSubsystemFactory::determine_type(CgroupInfo* cg_infos,
      * 34 28 0:29 / /sys/fs/cgroup/memory rw,nosuid,nodev,noexec,relatime shared:16 - cgroup cgroup rw,memory
      *
      * 44 31 0:39 / /sys/fs/cgroup/pids rw,nosuid,nodev,noexec,relatime shared:23 - cgroup cgroup rw,pids
+     *
      */
-    if (sscanf(p, "%*d %*d %*d:%*d %s %s %*[^-]- %s %*s %s", tmproot, tmpmount, tmp_fs_type, tmpcgroups) == 4) {
+    if (match_mount_info_line(p, tmproot, tmpmount, mount_opts, tmp_fs_type, tmpcgroups)) {
       if (strcmp("cgroup", tmp_fs_type) != 0) {
         // Skip cgroup2 fs lines on hybrid or unified hierarchy.
         continue;
       }
-      while ((token = strsep(&cptr, ",")) != NULL) {
+      while ((token = strsep(&cptr, ",")) != nullptr) {
         if (strcmp(token, "memory") == 0) {
           any_cgroup_mounts_found = true;
-          assert(cg_infos[MEMORY_IDX]._mount_path == NULL, "stomping of _mount_path");
-          cg_infos[MEMORY_IDX]._mount_path = os::strdup(tmpmount);
-          cg_infos[MEMORY_IDX]._root_mount_path = os::strdup(tmproot);
+          bool ro_option = find_ro_opt(mount_opts);
+          set_controller_paths(cg_infos, MEMORY_IDX, token, tmpmount, tmproot, ro_option);
           cg_infos[MEMORY_IDX]._data_complete = true;
         } else if (strcmp(token, "cpuset") == 0) {
           any_cgroup_mounts_found = true;
-          if (cg_infos[CPUSET_IDX]._mount_path != NULL) {
-            // On some systems duplicate cpuset controllers get mounted in addition to
-            // the main cgroup controllers most likely under /sys/fs/cgroup. In that
-            // case pick the one under /sys/fs/cgroup and discard others.
-            if (strstr(cg_infos[CPUSET_IDX]._mount_path, "/sys/fs/cgroup") != cg_infos[CPUSET_IDX]._mount_path) {
-              log_warning(os, container)("Duplicate cpuset controllers detected. Picking %s, skipping %s.",
-                                         tmpmount, cg_infos[CPUSET_IDX]._mount_path);
-              os::free(cg_infos[CPUSET_IDX]._mount_path);
-              cg_infos[CPUSET_IDX]._mount_path = os::strdup(tmpmount);
-            } else {
-              log_warning(os, container)("Duplicate cpuset controllers detected. Picking %s, skipping %s.",
-                                         cg_infos[CPUSET_IDX]._mount_path, tmpmount);
-            }
-          } else {
-            cg_infos[CPUSET_IDX]._mount_path = os::strdup(tmpmount);
-          }
-          cg_infos[CPUSET_IDX]._root_mount_path = os::strdup(tmproot);
+          bool ro_option = find_ro_opt(mount_opts);
+          set_controller_paths(cg_infos, CPUSET_IDX, token, tmpmount, tmproot, ro_option);
           cg_infos[CPUSET_IDX]._data_complete = true;
         } else if (strcmp(token, "cpu") == 0) {
           any_cgroup_mounts_found = true;
-          assert(cg_infos[CPU_IDX]._mount_path == NULL, "stomping of _mount_path");
-          cg_infos[CPU_IDX]._mount_path = os::strdup(tmpmount);
-          cg_infos[CPU_IDX]._root_mount_path = os::strdup(tmproot);
+          bool ro_option = find_ro_opt(mount_opts);
+          set_controller_paths(cg_infos, CPU_IDX, token, tmpmount, tmproot, ro_option);
           cg_infos[CPU_IDX]._data_complete = true;
         } else if (strcmp(token, "cpuacct") == 0) {
           any_cgroup_mounts_found = true;
-          assert(cg_infos[CPUACCT_IDX]._mount_path == NULL, "stomping of _mount_path");
-          cg_infos[CPUACCT_IDX]._mount_path = os::strdup(tmpmount);
-          cg_infos[CPUACCT_IDX]._root_mount_path = os::strdup(tmproot);
+          bool ro_option = find_ro_opt(mount_opts);
+          set_controller_paths(cg_infos, CPUACCT_IDX, token, tmpmount, tmproot, ro_option);
           cg_infos[CPUACCT_IDX]._data_complete = true;
         } else if (strcmp(token, "pids") == 0) {
           any_cgroup_mounts_found = true;
-          assert(cg_infos[PIDS_IDX]._mount_path == NULL, "stomping of _mount_path");
-          cg_infos[PIDS_IDX]._mount_path = os::strdup(tmpmount);
-          cg_infos[PIDS_IDX]._root_mount_path = os::strdup(tmproot);
+          bool ro_option = find_ro_opt(mount_opts);
+          set_controller_paths(cg_infos, PIDS_IDX, token, tmpmount, tmproot, ro_option);
           cg_infos[PIDS_IDX]._data_complete = true;
         }
       }
@@ -431,7 +525,7 @@ bool CgroupSubsystemFactory::determine_type(CgroupInfo* cg_infos,
 };
 
 void CgroupSubsystemFactory::cleanup(CgroupInfo* cg_infos) {
-  assert(cg_infos != NULL, "Invariant");
+  assert(cg_infos != nullptr, "Invariant");
   for (int i = 0; i < CG_INFO_LENGTH; i++) {
     os::free(cg_infos[i]._name);
     os::free(cg_infos[i]._cgroup_path);
@@ -456,35 +550,26 @@ void CgroupSubsystemFactory::cleanup(CgroupInfo* cg_infos) {
  * If user specified a quota (quota != -1), calculate the number of
  * required CPUs by dividing quota by period.
  *
- * If shares are in effect (shares != -1), calculate the number
- * of CPUs required for the shares by dividing the share value
- * by PER_CPU_SHARES.
- *
  * All results of division are rounded up to the next whole number.
  *
- * If neither shares or quotas have been specified, return the
+ * If quotas have not been specified, return the
  * number of active processors in the system.
  *
- * If both shares and quotas have been specified, the results are
- * based on the flag PreferContainerQuotaForCPUCount.  If true,
- * return the quota value.  If false return the smallest value
- * between shares or quotas.
- *
- * If shares and/or quotas have been specified, the resulting number
+ * If quotas have been specified, the resulting number
  * returned will never exceed the number of active processors.
  *
  * return:
  *    number of CPUs
  */
 int CgroupSubsystem::active_processor_count() {
-  int quota_count = 0, share_count = 0;
-  int cpu_count, limit_count;
+  int quota_count = 0;
+  int cpu_count;
   int result;
 
   // We use a cache with a timeout to avoid performing expensive
   // computations in the event this function is called frequently.
   // [See 8227006].
-  CachingCgroupController* contrl = cpu_controller();
+  CachingCgroupController<CgroupCpuController>* contrl = cpu_controller();
   CachedMetric* cpu_limit = contrl->metrics_cache();
   if (!cpu_limit->should_check_metric()) {
     int val = (int)cpu_limit->value();
@@ -492,39 +577,8 @@ int CgroupSubsystem::active_processor_count() {
     return val;
   }
 
-  cpu_count = limit_count = os::Linux::active_processor_count();
-  int quota  = cpu_quota();
-  int period = cpu_period();
-  int share  = cpu_shares();
-
-  if (quota > -1 && period > 0) {
-    quota_count = ceilf((float)quota / (float)period);
-    log_trace(os, container)("CPU Quota count based on quota/period: %d", quota_count);
-  }
-  if (share > -1) {
-    share_count = ceilf((float)share / (float)PER_CPU_SHARES);
-    log_trace(os, container)("CPU Share count based on shares: %d", share_count);
-  }
-
-  // If both shares and quotas are setup results depend
-  // on flag PreferContainerQuotaForCPUCount.
-  // If true, limit CPU count to quota
-  // If false, use minimum of shares and quotas
-  if (quota_count !=0 && share_count != 0) {
-    if (PreferContainerQuotaForCPUCount) {
-      limit_count = quota_count;
-    } else {
-      limit_count = MIN2(quota_count, share_count);
-    }
-  } else if (quota_count != 0) {
-    limit_count = quota_count;
-  } else if (share_count != 0) {
-    limit_count = share_count;
-  }
-
-  result = MIN2(cpu_count, limit_count);
-  log_trace(os, container)("OSContainer::active_processor_count: %d", result);
-
+  cpu_count = os::Linux::active_processor_count();
+  result = CgroupUtil::processor_count(contrl->controller(), cpu_count);
   // Update cached metric to avoid re-reading container settings too often
   cpu_limit->set_value(result, OSCONTAINER_CACHE_TIMEOUT);
 
@@ -541,32 +595,227 @@ int CgroupSubsystem::active_processor_count() {
  *    OSCONTAINER_ERROR for not supported
  */
 jlong CgroupSubsystem::memory_limit_in_bytes() {
-  CachingCgroupController* contrl = memory_controller();
+  CachingCgroupController<CgroupMemoryController>* contrl = memory_controller();
   CachedMetric* memory_limit = contrl->metrics_cache();
   if (!memory_limit->should_check_metric()) {
     return memory_limit->value();
   }
-  jlong mem_limit = read_memory_limit_in_bytes();
+  jlong phys_mem = os::Linux::physical_memory();
+  log_trace(os, container)("total physical memory: " JLONG_FORMAT, phys_mem);
+  jlong mem_limit = contrl->controller()->read_memory_limit_in_bytes(phys_mem);
   // Update cached metric to avoid re-reading container settings too often
   memory_limit->set_value(mem_limit, OSCONTAINER_CACHE_TIMEOUT);
   return mem_limit;
 }
 
-jlong CgroupSubsystem::limit_from_str(char* limit_str) {
-  if (limit_str == NULL) {
+bool CgroupController::read_string(const char* filename, char* buf, size_t buf_size) {
+  assert(buf != nullptr, "buffer must not be null");
+  assert(filename != nullptr, "filename must be given");
+  const char* s_path = subsystem_path();
+  if (s_path == nullptr) {
+    log_debug(os, container)("read_string: subsystem path is null");
+    return false;
+  }
+
+  stringStream file_path;
+  file_path.print_raw(s_path);
+  file_path.print_raw(filename);
+
+  if (file_path.size() > MAXPATHLEN) {
+    log_debug(os, container)("File path too long %s, %s", file_path.base(), filename);
+    return false;
+  }
+  const char* absolute_path = file_path.freeze();
+  log_trace(os, container)("Path to %s is %s", filename, absolute_path);
+
+  FILE* fp = os::fopen(absolute_path, "r");
+  if (fp == nullptr) {
+    log_debug(os, container)("Open of file %s failed, %s", absolute_path, os::strerror(errno));
+    return false;
+  }
+
+  // Read a single line into the provided buffer.
+  // At most buf_size - 1 characters.
+  char* line = fgets(buf, buf_size, fp);
+  fclose(fp);
+  if (line == nullptr) {
+    log_debug(os, container)("Empty file %s", absolute_path);
+    return false;
+  }
+  size_t len = strlen(line);
+  assert(len <= buf_size - 1, "At most buf_size - 1 bytes can be read");
+  if (line[len - 1] == '\n') {
+    line[len - 1] = '\0'; // trim trailing new line
+  }
+  return true;
+}
+
+bool CgroupController::read_number(const char* filename, julong* result) {
+  char buf[1024];
+  bool is_ok = read_string(filename, buf, 1024);
+  if (!is_ok) {
+    return false;
+  }
+  int matched = sscanf(buf, JULONG_FORMAT, result);
+  if (matched == 1) {
+    return true;
+  }
+  return false;
+}
+
+bool CgroupController::read_number_handle_max(const char* filename, jlong* result) {
+  char buf[1024];
+  bool is_ok = read_string(filename, buf, 1024);
+  if (!is_ok) {
+    return false;
+  }
+  jlong val = limit_from_str(buf);
+  if (val == OSCONTAINER_ERROR) {
+    return false;
+  }
+  *result = val;
+  return true;
+}
+
+bool CgroupController::read_numerical_key_value(const char* filename, const char* key, julong* result) {
+  assert(key != nullptr, "key must be given");
+  assert(result != nullptr, "result pointer must not be null");
+  assert(filename != nullptr, "file to search in must be given");
+  const char* s_path = subsystem_path();
+  if (s_path == nullptr) {
+    log_debug(os, container)("read_numerical_key_value: subsystem path is null");
+    return false;
+  }
+
+  stringStream file_path;
+  file_path.print_raw(s_path);
+  file_path.print_raw(filename);
+
+  if (file_path.size() > MAXPATHLEN) {
+    log_debug(os, container)("File path too long %s, %s", file_path.base(), filename);
+    return false;
+  }
+  const char* absolute_path = file_path.freeze();
+  log_trace(os, container)("Path to %s is %s", filename, absolute_path);
+  FILE* fp = os::fopen(absolute_path, "r");
+  if (fp == nullptr) {
+    log_debug(os, container)("Open of file %s failed, %s", absolute_path, os::strerror(errno));
+    return false;
+  }
+
+  const int buf_len = MAXPATHLEN+1;
+  char buf[buf_len];
+  char* line = fgets(buf, buf_len, fp);
+  bool found_match = false;
+  // File consists of multiple lines in a "key value"
+  // fashion, we have to find the key.
+  const size_t key_len = strlen(key);
+  for (; line != nullptr; line = fgets(buf, buf_len, fp)) {
+    char after_key = line[key_len];
+    if (strncmp(line, key, key_len) == 0
+          && isspace((unsigned char) after_key) != 0
+          && after_key != '\n') {
+      // Skip key, skip space
+      const char* value_substr = line + key_len + 1;
+      int matched = sscanf(value_substr, JULONG_FORMAT, result);
+      found_match = matched == 1;
+      if (found_match) {
+        break;
+      }
+    }
+  }
+  fclose(fp);
+  if (found_match) {
+    return true;
+  }
+  log_debug(os, container)("Type %s (key == %s) not found in file %s", JULONG_FORMAT,
+                           key, absolute_path);
+  return false;
+}
+
+bool CgroupController::read_numerical_tuple_value(const char* filename, bool use_first, jlong* result) {
+  char buf[1024];
+  bool is_ok = read_string(filename, buf, 1024);
+  if (!is_ok) {
+    return false;
+  }
+  char token[1024];
+  const int matched = sscanf(buf, (use_first ? "%1023s %*s" : "%*s %1023s"), token);
+  if (matched != 1) {
+    return false;
+  }
+  jlong val = limit_from_str(token);
+  if (val == OSCONTAINER_ERROR) {
+    return false;
+  }
+  *result = val;
+  return true;
+}
+
+jlong CgroupController::limit_from_str(char* limit_str) {
+  if (limit_str == nullptr) {
     return OSCONTAINER_ERROR;
   }
   // Unlimited memory in cgroups is the literal string 'max' for
   // some controllers, for example the pids controller.
   if (strcmp("max", limit_str) == 0) {
-    os::free(limit_str);
     return (jlong)-1;
   }
   julong limit;
   if (sscanf(limit_str, JULONG_FORMAT, &limit) != 1) {
-    os::free(limit_str);
     return OSCONTAINER_ERROR;
   }
-  os::free(limit_str);
   return (jlong)limit;
+}
+
+// CgroupSubsystem implementations
+
+jlong CgroupSubsystem::memory_and_swap_limit_in_bytes() {
+  julong phys_mem = os::Linux::physical_memory();
+  julong host_swap = os::Linux::host_swap();
+  return memory_controller()->controller()->memory_and_swap_limit_in_bytes(phys_mem, host_swap);
+}
+
+jlong CgroupSubsystem::memory_and_swap_usage_in_bytes() {
+  julong phys_mem = os::Linux::physical_memory();
+  julong host_swap = os::Linux::host_swap();
+  return memory_controller()->controller()->memory_and_swap_usage_in_bytes(phys_mem, host_swap);
+}
+
+jlong CgroupSubsystem::memory_soft_limit_in_bytes() {
+  julong phys_mem = os::Linux::physical_memory();
+  return memory_controller()->controller()->memory_soft_limit_in_bytes(phys_mem);
+}
+
+jlong CgroupSubsystem::memory_usage_in_bytes() {
+  return memory_controller()->controller()->memory_usage_in_bytes();
+}
+
+jlong CgroupSubsystem::memory_max_usage_in_bytes() {
+  return memory_controller()->controller()->memory_max_usage_in_bytes();
+}
+
+jlong CgroupSubsystem::rss_usage_in_bytes() {
+  return memory_controller()->controller()->rss_usage_in_bytes();
+}
+
+jlong CgroupSubsystem::cache_usage_in_bytes() {
+  return memory_controller()->controller()->cache_usage_in_bytes();
+}
+
+int CgroupSubsystem::cpu_quota() {
+  return cpu_controller()->controller()->cpu_quota();
+}
+
+int CgroupSubsystem::cpu_period() {
+  return cpu_controller()->controller()->cpu_period();
+}
+
+int CgroupSubsystem::cpu_shares() {
+  return cpu_controller()->controller()->cpu_shares();
+}
+
+void CgroupSubsystem::print_version_specific_info(outputStream* st) {
+  julong phys_mem = os::Linux::physical_memory();
+  memory_controller()->controller()->print_version_specific_info(st, phys_mem);
 }

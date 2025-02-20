@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,9 @@
 #ifndef SHARE_PRIMS_VECTORSUPPORT_HPP
 #define SHARE_PRIMS_VECTORSUPPORT_HPP
 
-#include "jni.h"
 #include "code/debugInfo.hpp"
-#include "memory/allocation.hpp"
+#include "jni.h"
+#include "memory/allStatic.hpp"
 #include "oops/typeArrayOop.hpp"
 #include "runtime/registerMap.hpp"
 #include "utilities/exceptions.hpp"
@@ -54,6 +54,7 @@ class VectorSupport : AllStatic {
     VECTOR_OP_ABS     = 0,
     VECTOR_OP_NEG     = 1,
     VECTOR_OP_SQRT    = 2,
+    VECTOR_OP_BIT_COUNT = 3,
 
     // Binary
     VECTOR_OP_ADD     = 4,
@@ -76,17 +77,29 @@ class VectorSupport : AllStatic {
 
     // Convert
     VECTOR_OP_CAST        = 17,
-    VECTOR_OP_REINTERPRET = 18,
+    VECTOR_OP_UCAST       = 18,
+    VECTOR_OP_REINTERPRET = 19,
 
     // Mask manipulation operations
-    VECTOR_OP_MASK_TRUECOUNT = 19,
-    VECTOR_OP_MASK_FIRSTTRUE = 20,
-    VECTOR_OP_MASK_LASTTRUE  = 21,
-    VECTOR_OP_MASK_TOLONG    = 22,
+    VECTOR_OP_MASK_TRUECOUNT = 20,
+    VECTOR_OP_MASK_FIRSTTRUE = 21,
+    VECTOR_OP_MASK_LASTTRUE  = 22,
+    VECTOR_OP_MASK_TOLONG    = 23,
 
     // Rotate operations
-    VECTOR_OP_LROTATE = 23,
-    VECTOR_OP_RROTATE = 24,
+    VECTOR_OP_LROTATE = 24,
+    VECTOR_OP_RROTATE = 25,
+
+    VECTOR_OP_COMPRESS = 26,
+    VECTOR_OP_EXPAND = 27,
+    VECTOR_OP_MASK_COMPRESS = 28,
+
+    VECTOR_OP_TZ_COUNT = 29,
+    VECTOR_OP_LZ_COUNT = 30,
+    VECTOR_OP_REVERSE  = 31,
+    VECTOR_OP_REVERSE_BYTES = 32,
+    VECTOR_OP_COMPRESS_BITS = 33,
+    VECTOR_OP_EXPAND_BITS = 34,
 
     // Vector Math Library
     VECTOR_OP_TAN   = 101,
@@ -108,9 +121,16 @@ class VectorSupport : AllStatic {
     VECTOR_OP_EXPM1 = 117,
     VECTOR_OP_HYPOT = 118,
 
-    VECTOR_OP_SVML_START = VECTOR_OP_TAN,
-    VECTOR_OP_SVML_END   = VECTOR_OP_HYPOT,
-    NUM_SVML_OP = VECTOR_OP_SVML_END - VECTOR_OP_SVML_START + 1
+    VECTOR_OP_SADD  = 119,
+    VECTOR_OP_SSUB  = 120,
+    VECTOR_OP_SUADD = 121,
+    VECTOR_OP_SUSUB = 122,
+    VECTOR_OP_UMIN  = 123,
+    VECTOR_OP_UMAX  = 124,
+
+    VECTOR_OP_MATH_START = VECTOR_OP_TAN,
+    VECTOR_OP_MATH_END   = VECTOR_OP_HYPOT,
+    NUM_VECTOR_OP_MATH   = VECTOR_OP_MATH_END - VECTOR_OP_MATH_START + 1
   };
 
   enum {
@@ -118,7 +138,8 @@ class VectorSupport : AllStatic {
     VEC_SIZE_128 = 1,
     VEC_SIZE_256 = 2,
     VEC_SIZE_512 = 3,
-    NUM_VEC_SIZES = 4
+    VEC_SIZE_SCALABLE = 4,
+    NUM_VEC_SIZES = 5
   };
 
   enum {
@@ -126,14 +147,15 @@ class VectorSupport : AllStatic {
     MODE_BITS_COERCED_LONG_TO_MASK = 1
   };
 
-  static const char* svmlname[VectorSupport::NUM_SVML_OP];
+  static const char* mathname[VectorSupport::NUM_VECTOR_OP_MATH];
 
   static int vop2ideal(jint vop, BasicType bt);
+  static bool has_scalar_op(jint id);
+  static bool is_unsigned_op(jint id);
 
   static instanceOop allocate_vector(InstanceKlass* holder, frame* fr, RegisterMap* reg_map, ObjectValue* sv, TRAPS);
 
   static bool is_vector(Klass* klass);
   static bool is_vector_mask(Klass* klass);
-  static bool is_vector_shuffle(Klass* klass);
 };
 #endif // SHARE_PRIMS_VECTORSUPPORT_HPP

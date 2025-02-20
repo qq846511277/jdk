@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -89,16 +89,21 @@ public class CCharToGlyphMapper extends CharToGlyphMapper {
     }
 
     public synchronized int charToGlyph(char unicode) {
-        final int glyph = cache.get(unicode);
+        int glyph = cache.get(unicode);
         if (glyph != 0) return glyph;
 
-        final char[] unicodeArray = new char[] { unicode };
-        final int[] glyphArray = new int[1];
+        if (FontUtilities.isDefaultIgnorable(unicode)) {
+            glyph = INVISIBLE_GLYPH_ID;
+        } else {
+            final char[] unicodeArray = new char[] { unicode };
+            final int[] glyphArray = new int[1];
+            nativeCharsToGlyphs(fFont.getNativeFontPtr(), 1, unicodeArray, glyphArray);
+            glyph = glyphArray[0];
+        }
 
-        nativeCharsToGlyphs(fFont.getNativeFontPtr(), 1, unicodeArray, glyphArray);
-        cache.put(unicode, glyphArray[0]);
+        cache.put(unicode, glyph);
 
-        return glyphArray[0];
+        return glyph;
     }
 
     public synchronized int charToGlyph(int unicode) {
@@ -122,7 +127,7 @@ public class CCharToGlyphMapper extends CharToGlyphMapper {
     public synchronized void charsToGlyphs(int count, int[] unicodes, int[] glyphs) {
         for (int i = 0; i < count; i++) {
             glyphs[i] = charToGlyph(unicodes[i]);
-        };
+        }
     }
 
     // This mapper returns either the glyph code, or if the character can be
@@ -219,7 +224,7 @@ public class CCharToGlyphMapper extends CharToGlyphMapper {
             }
         }
 
-        public synchronized void get(int count, char[] indicies, int[] values)
+        public synchronized void get(int count, char[] indices, int[] values)
         {
             // "missed" is the count of 'char' that are not mapped.
             // Surrogates count for 2.
@@ -230,11 +235,11 @@ public class CCharToGlyphMapper extends CharToGlyphMapper {
             int [] unmappedCharIndices = null;
 
             for (int i = 0; i < count; i++){
-                int code = indicies[i];
+                int code = indices[i];
                 if (code >= HI_SURROGATE_START &&
                     code <= HI_SURROGATE_END && i < count - 1)
                 {
-                    char low = indicies[i + 1];
+                    char low = indices[i + 1];
                     if (low >= LO_SURROGATE_START && low <= LO_SURROGATE_END) {
                         code = (code - HI_SURROGATE_START) * 0x400 +
                             low - LO_SURROGATE_START + 0x10000;
@@ -248,19 +253,22 @@ public class CCharToGlyphMapper extends CharToGlyphMapper {
                         values[i+1] = INVISIBLE_GLYPH_ID;
                         i++;
                     }
+                } else if (FontUtilities.isDefaultIgnorable(code)) {
+                    values[i] = INVISIBLE_GLYPH_ID;
+                    put(code, INVISIBLE_GLYPH_ID);
                 } else {
                     values[i] = 0;
                     put(code, -1);
                     if (unmappedChars == null) {
                         // This is likely to be longer than we need,
                         // but is the simplest and cheapest option.
-                        unmappedChars = new char[indicies.length];
-                        unmappedCharIndices = new int[indicies.length];
+                        unmappedChars = new char[indices.length];
+                        unmappedCharIndices = new int[indices.length];
                     }
-                    unmappedChars[missed] = indicies[i];
+                    unmappedChars[missed] = indices[i];
                     unmappedCharIndices[missed] = i;
                     if (code >= 0x10000) { // was a surrogate pair
-                        unmappedChars[++missed] = indicies[++i];
+                        unmappedChars[++missed] = indices[++i];
                     }
                     missed++;
                 }

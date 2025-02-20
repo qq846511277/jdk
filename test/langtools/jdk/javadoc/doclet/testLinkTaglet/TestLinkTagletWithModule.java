@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,8 +50,8 @@ public class TestLinkTagletWithModule extends JavadocTester {
     private final Path src;
 
     public static void main(String... args) throws Exception {
-        TestLinkTagletWithModule tester = new TestLinkTagletWithModule();
-        tester.runTests(m -> new Object[]{Paths.get(m.getName())});
+        var tester = new TestLinkTagletWithModule();
+        tester.runTests();
     }
 
     TestLinkTagletWithModule() throws Exception {
@@ -76,7 +76,7 @@ public class TestLinkTagletWithModule extends JavadocTester {
                      <a href="../../../../m1/module-summary.html"><code>m1</code></a>
                      <a href="../../../../m1/com/m1/lib/package-summary.html"><code>package link</code></a>
                      <a href="../../../../m1/com/m1/lib/Lib.html" title="class in com.m1.lib"><code>Lib</code></a>
-                     <a href="../../../../m1/com/m1/lib/Lib.html#method(java.lang.String)"><code>Lib.method(java.lang.String)</code></a>
+                     <a href="../../../../m1/com/m1/lib/Lib.html#method(java.lang.String)"><code>Lib.method(String)</code></a>
                      <a href="../../../../m1/com/m1/lib/Lib.html#method(java.lang.String)"><code>Lib.method(String)</code></a>
                      <a href="../../../../m2/module-summary.html">m2</a>
                      <a href="../../../../m2/module-summary.html">m2</a>
@@ -110,7 +110,7 @@ public class TestLinkTagletWithModule extends JavadocTester {
                      <a href="../../../../../out1/m1/com/m1/lib/Lib.html" title="class or interface in com.m1.lib"\
                      class="external-link"><code>Lib</code></a>
                      <a href="../../../../../out1/m1/com/m1/lib/Lib.html#method(java.lang.String)" title="class or\
-                     interface in com.m1.lib" class="external-link"><code>Lib.method(java.lang.String)</code></a>
+                     interface in com.m1.lib" class="external-link"><code>Lib.method(String)</code></a>
                      <a href="../../../../../out1/m1/com/m1/lib/Lib.html#method(java.lang.String)" title="class or\
                      interface in com.m1.lib" class="external-link"><code>Lib.method(String)</code></a>
                      <a href="../../../../../out1/m2/module-summary.html" class="external-link">m2</a>

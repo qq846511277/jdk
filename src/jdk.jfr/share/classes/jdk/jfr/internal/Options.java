@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,11 +26,9 @@
 package jdk.jfr.internal;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
-import jdk.jfr.internal.LogLevel;
-import jdk.jfr.internal.LogTag;
-import jdk.jfr.internal.Logger;
-import jdk.jfr.internal.SecuritySupport.SafePath;
 import jdk.internal.misc.Unsafe;
 
 import static java.nio.file.LinkOption.*;
@@ -43,7 +41,6 @@ import static java.nio.file.LinkOption.*;
  */
 public final class Options {
 
-    private static final JVM jvm = JVM.getJVM();
     private static final long WAIT_INTERVAL = 1000; // ms;
 
     private static final long MIN_MAX_CHUNKSIZE = 1024 * 1024;
@@ -53,17 +50,17 @@ public final class Options {
     private static final long DEFAULT_MEMORY_SIZE = DEFAULT_GLOBAL_BUFFER_COUNT * DEFAULT_GLOBAL_BUFFER_SIZE;
     private static long DEFAULT_THREAD_BUFFER_SIZE;
     private static final int DEFAULT_STACK_DEPTH = 64;
-    private static final boolean DEFAULT_SAMPLE_THREADS = true;
     private static final long DEFAULT_MAX_CHUNK_SIZE = 12 * 1024 * 1024;
-    private static final SafePath DEFAULT_DUMP_PATH = null;
+    private static final Path DEFAULT_DUMP_PATH = null;
+    private static final boolean DEFAULT_PRESERVE_REPOSITORY = false;
 
     private static long memorySize;
     private static long globalBufferSize;
     private static long globalBufferCount;
     private static long threadBufferSize;
     private static int stackDepth;
-    private static boolean sampleThreads;
     private static long maxChunkSize;
+    private static boolean preserveRepository;
 
     static {
         final long pageSize = Unsafe.getUnsafe().pageSize();
@@ -75,7 +72,7 @@ public final class Options {
         if (max < MIN_MAX_CHUNKSIZE) {
             throw new IllegalArgumentException("Max chunk size must be at least " + MIN_MAX_CHUNKSIZE);
         }
-        jvm.setFileNotification(max);
+        JVM.setFileNotification(max);
         maxChunkSize = max;
     }
 
@@ -84,7 +81,7 @@ public final class Options {
     }
 
     public static synchronized void setMemorySize(long memSize) {
-        jvm.setMemorySize(memSize);
+        JVM.setMemorySize(memSize);
         memorySize = memSize;
     }
 
@@ -93,7 +90,7 @@ public final class Options {
     }
 
     public static synchronized void setThreadBufferSize(long threadBufSize) {
-        jvm.setThreadBufferSize(threadBufSize);
+        JVM.setThreadBufferSize(threadBufSize);
         threadBufferSize = threadBufSize;
     }
 
@@ -106,7 +103,7 @@ public final class Options {
     }
 
     public static synchronized void setGlobalBufferCount(long globalBufCount) {
-        jvm.setGlobalBufferCount(globalBufCount);
+        JVM.setGlobalBufferCount(globalBufCount);
         globalBufferCount = globalBufCount;
     }
 
@@ -115,27 +112,27 @@ public final class Options {
     }
 
     public static synchronized void setGlobalBufferSize(long globalBufsize) {
-        jvm.setGlobalBufferSize(globalBufsize);
+        JVM.setGlobalBufferSize(globalBufsize);
         globalBufferSize = globalBufsize;
     }
 
-    public static synchronized void setDumpPath(SafePath path) throws IOException {
+    public static synchronized void setDumpPath(Path path) throws IOException {
         if (path != null) {
-            if (SecuritySupport.isWritable(path)) {
-                path = SecuritySupport.toRealPath(path, NOFOLLOW_LINKS);
+            if (Files.isWritable(path)) {
+                path = path.toRealPath(NOFOLLOW_LINKS);
             } else {
                 throw new IOException("Cannot write JFR emergency dump to " + path.toString());
             }
         }
-        jvm.setDumpPath(path == null ? null : path.toString());
+        JVM.setDumpPath(path == null ? null : path.toString());
     }
 
-    public static synchronized SafePath getDumpPath() {
-        return new SafePath(jvm.getDumpPath());
+    public static synchronized Path getDumpPath() {
+        return Path.of(JVM.getDumpPath());
     }
 
     public static synchronized void setStackDepth(Integer stackTraceDepth) {
-        jvm.setStackDepth(stackTraceDepth);
+        JVM.setStackDepth(stackTraceDepth);
         stackDepth = stackTraceDepth;
     }
 
@@ -143,13 +140,12 @@ public final class Options {
         return stackDepth;
     }
 
-    public static synchronized void setSampleThreads(Boolean sample) {
-        jvm.setSampleThreads(sample);
-        sampleThreads = sample;
+    public static synchronized void setPreserveRepository(boolean preserve) {
+        preserveRepository = preserve;
     }
 
-    public static synchronized boolean getSampleThreads() {
-        return sampleThreads;
+    public static synchronized boolean getPreserveRepository() {
+        return preserveRepository;
     }
 
     private static synchronized void reset() {
@@ -162,9 +158,9 @@ public final class Options {
         } catch (IOException e) {
             // Ignore (depends on default value in JVM: it would be NULL)
         }
-        setSampleThreads(DEFAULT_SAMPLE_THREADS);
         setStackDepth(DEFAULT_STACK_DEPTH);
         setThreadBufferSize(DEFAULT_THREAD_BUFFER_SIZE);
+        setPreserveRepository(DEFAULT_PRESERVE_REPOSITORY);
     }
 
     static synchronized long getWaitInterval() {

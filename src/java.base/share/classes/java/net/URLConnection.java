@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,24 +28,21 @@ package java.net;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.security.PrivilegedAction;
 import java.util.Hashtable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Date;
 import java.util.Iterator;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
 import java.util.StringTokenizer;
 import java.util.Collections;
+import java.util.Locale;
 import java.util.Map;
 import java.util.List;
 import java.security.Permission;
-import java.security.AccessController;
 import sun.security.util.SecurityConstants;
 import sun.net.www.MessageHeader;
-import sun.security.action.GetPropertyAction;
 
 /**
  * The abstract class {@code URLConnection} is the superclass
@@ -132,6 +129,8 @@ import sun.security.action.GetPropertyAction;
  * instance, unless particular protocol specifications specify different behaviours
  * for it.
  *
+ * @spec https://www.rfc-editor.org/info/rfc2616
+ *      RFC 2616: Hypertext Transfer Protocol -- HTTP/1.1
  * @author  James Gosling
  * @see     java.net.URL#openConnection()
  * @see     java.net.URLConnection#connect()
@@ -306,8 +305,8 @@ public abstract class URLConnection {
 
         if (map == null) {
             fileNameMap = map = new FileNameMap() {
-                private FileNameMap internalMap =
-                    sun.net.www.MimeTable.loadTable();
+                private final FileNameMap internalMap =
+                    sun.net.www.MimeTable.getDefaultTable();
 
                 public String getContentTypeFor(String fileName) {
                     return internalMap.getContentTypeFor(fileName);
@@ -320,23 +319,12 @@ public abstract class URLConnection {
 
     /**
      * Sets the FileNameMap.
-     * <p>
-     * If there is a security manager, this method first calls
-     * the security manager's {@code checkSetFactory} method
-     * to ensure the operation is allowed.
-     * This could result in a SecurityException.
      *
      * @param map the FileNameMap to be set
-     * @throws     SecurityException  if a security manager exists and its
-     *             {@code checkSetFactory} method doesn't allow the operation.
-     * @see        SecurityManager#checkSetFactory
      * @see #getFileNameMap()
      * @since 1.2
      */
     public static void setFileNameMap(FileNameMap map) {
-        @SuppressWarnings("removal")
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null) sm.checkSetFactory();
         fileNameMap = map;
     }
 
@@ -612,18 +600,20 @@ public abstract class URLConnection {
      * headers. Classes for that connection type can override this method
      * and short-circuit the parsing.
      *
-     * @param   name      the name of the header field.
-     * @param   Default   the default value.
+     * @param   name          the name of the header field.
+     * @param   defaultValue  the default value.
      * @return  the value of the named field, parsed as an integer. The
-     *          {@code Default} value is returned if the field is
+     *          {@code defaultValue} value is returned if the field is
      *          missing or malformed.
      */
-    public int getHeaderFieldInt(String name, int Default) {
-        String value = getHeaderField(name);
-        try {
-            return Integer.parseInt(value);
-        } catch (Exception e) { }
-        return Default;
+    public int getHeaderFieldInt(String name, int defaultValue) {
+        final String value = getHeaderField(name);
+        if (value != null) {
+            try {
+                return Integer.parseInt(value);
+            } catch (NumberFormatException e) { }
+        }
+        return defaultValue;
     }
 
     /**
@@ -634,19 +624,21 @@ public abstract class URLConnection {
      * headers. Classes for that connection type can override this method
      * and short-circuit the parsing.
      *
-     * @param   name      the name of the header field.
-     * @param   Default   the default value.
+     * @param   name          the name of the header field.
+     * @param   defaultValue  the default value.
      * @return  the value of the named field, parsed as a long. The
-     *          {@code Default} value is returned if the field is
+     *          {@code defaultValue} value is returned if the field is
      *          missing or malformed.
      * @since 1.7
      */
-    public long getHeaderFieldLong(String name, long Default) {
-        String value = getHeaderField(name);
-        try {
-            return Long.parseLong(value);
-        } catch (Exception e) { }
-        return Default;
+    public long getHeaderFieldLong(String name, long defaultValue) {
+        final String value = getHeaderField(name);
+        if (value != null) {
+            try {
+                return Long.parseLong(value);
+            } catch (NumberFormatException e) { }
+        }
+        return defaultValue;
     }
 
     /**
@@ -659,19 +651,21 @@ public abstract class URLConnection {
      * headers. Classes for that connection type can override this method
      * and short-circuit the parsing.
      *
-     * @param   name     the name of the header field.
-     * @param   Default   a default value.
+     * @param   name          the name of the header field.
+     * @param   defaultValue  a default value.
      * @return  the value of the field, parsed as a date. The value of the
-     *          {@code Default} argument is returned if the field is
+     *          {@code defaultValue} argument is returned if the field is
      *          missing or malformed.
      */
     @SuppressWarnings("deprecation")
-    public long getHeaderFieldDate(String name, long Default) {
-        String value = getHeaderField(name);
-        try {
-            return Date.parse(value);
-        } catch (Exception e) { }
-        return Default;
+    public long getHeaderFieldDate(String name, long defaultValue) {
+        final String value = getHeaderField(name);
+        if (value != null) {
+            try {
+                return Date.parse(value);
+            } catch (Exception e) { }
+        }
+        return defaultValue;
     }
 
     /**
@@ -839,6 +833,12 @@ public abstract class URLConnection {
      * A SocketTimeoutException can be thrown when reading from the
      * returned input stream if the read timeout expires before data
      * is available for read.
+     *
+     * @apiNote The {@code InputStream} returned by this method can wrap an
+     * {@link java.util.zip.InflaterInputStream InflaterInputStream}, whose
+     * {@link java.util.zip.InflaterInputStream#read(byte[], int, int)
+     * read(byte[], int, int)} method can modify any element of the output
+     * buffer.
      *
      * @return     an input stream that reads from this open connection.
      * @throws     IOException              if an I/O error occurs while
@@ -1086,7 +1086,7 @@ public abstract class URLConnection {
      * @since 9
      */
     public static void setDefaultUseCaches(String protocol, boolean defaultVal) {
-        protocol = protocol.toLowerCase(Locale.US);
+        protocol = URL.lowerCaseProtocol(protocol);
         defaultCaching.put(protocol, defaultVal);
     }
 
@@ -1102,7 +1102,7 @@ public abstract class URLConnection {
      * @since 9
      */
     public static boolean getDefaultUseCaches(String protocol) {
-        Boolean protoDefault = defaultCaching.get(protocol.toLowerCase(Locale.US));
+        Boolean protoDefault = defaultCaching.get(URL.lowerCaseProtocol(protocol));
         if (protoDefault != null) {
             return protoDefault.booleanValue();
         } else {
@@ -1269,28 +1269,15 @@ public abstract class URLConnection {
      * <p>
      * The {@code ContentHandlerFactory} instance is used to
      * construct a content handler from a content type.
-     * <p>
-     * If there is a security manager, this method first calls
-     * the security manager's {@code checkSetFactory} method
-     * to ensure the operation is allowed.
-     * This could result in a SecurityException.
      *
      * @param      fac   the desired factory.
      * @throws     Error  if the factory has already been defined.
-     * @throws     SecurityException  if a security manager exists and its
-     *             {@code checkSetFactory} method doesn't allow the operation.
      * @see        java.net.ContentHandlerFactory
      * @see        java.net.URLConnection#getContent()
-     * @see        SecurityManager#checkSetFactory
      */
     public static synchronized void setContentHandlerFactory(ContentHandlerFactory fac) {
         if (factory != null) {
             throw new Error("factory already defined");
-        }
-        @SuppressWarnings("removal")
-        SecurityManager security = System.getSecurityManager();
-        if (security != null) {
-            security.checkSetFactory();
         }
         factory = fac;
     }
@@ -1401,37 +1388,23 @@ public abstract class URLConnection {
         return UnknownContentHandler.INSTANCE;
     }
 
-    @SuppressWarnings("removal")
     private ContentHandler lookupContentHandlerViaProvider(String contentType) {
-        return AccessController.doPrivileged(
-                new PrivilegedAction<>() {
-                    @Override
-                    public ContentHandler run() {
-                        ClassLoader cl = ClassLoader.getSystemClassLoader();
-                        ServiceLoader<ContentHandlerFactory> sl =
-                                ServiceLoader.load(ContentHandlerFactory.class, cl);
 
-                        Iterator<ContentHandlerFactory> iterator = sl.iterator();
+        ClassLoader cl = ClassLoader.getSystemClassLoader();
+        ServiceLoader<ContentHandlerFactory> sl =
+                ServiceLoader.load(ContentHandlerFactory.class, cl);
 
-                        ContentHandler handler = null;
-                        while (iterator.hasNext()) {
-                            ContentHandlerFactory f;
-                            try {
-                                f = iterator.next();
-                            } catch (ServiceConfigurationError e) {
-                                if (e.getCause() instanceof SecurityException) {
-                                    continue;
-                                }
-                                throw e;
-                            }
-                            handler = f.createContentHandler(contentType);
-                            if (handler != null) {
-                                break;
-                            }
-                        }
-                        return handler;
-                    }
-                });
+        Iterator<ContentHandlerFactory> iterator = sl.iterator();
+
+        ContentHandler handler = null;
+        while (iterator.hasNext()) {
+            ContentHandlerFactory f = iterator.next();
+            handler = f.createContentHandler(contentType);
+            if (handler != null) {
+                break;
+            }
+        }
+        return handler;
     }
 
     /**
@@ -1441,7 +1414,7 @@ public abstract class URLConnection {
      */
     private String typeToPackageName(String contentType) {
         // make sure we canonicalize the class name: all lower case
-        contentType = contentType.toLowerCase();
+        contentType = contentType.toLowerCase(Locale.ROOT);
         int len = contentType.length();
         char nm[] = new char[len];
         contentType.getChars(0, len, nm, 0);
@@ -1467,8 +1440,7 @@ public abstract class URLConnection {
      * is always the last one on the returned package list.
      */
     private String getContentHandlerPkgPrefixes() {
-        String packagePrefixList =
-                GetPropertyAction.privilegedGetProperty(contentPathProp, "");
+        String packagePrefixList = System.getProperty(contentPathProp, "");
 
         if (packagePrefixList != "") {
             packagePrefixList += "|";

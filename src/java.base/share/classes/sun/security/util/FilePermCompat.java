@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,8 +25,6 @@
 
 package sun.security.util;
 
-import sun.security.action.GetPropertyAction;
-
 import java.io.FilePermission;
 import java.security.Permission;
 import jdk.internal.access.SharedSecrets;
@@ -42,7 +40,7 @@ public class FilePermCompat {
     public static final boolean compat;
 
     static {
-        String flag = SecurityProperties.privilegedGetOverridable(
+        String flag = SecurityProperties.getOverridableProperty(
                 "jdk.io.permissionsUseCanonicalPath");
         if (flag == null) {
             flag = "false";

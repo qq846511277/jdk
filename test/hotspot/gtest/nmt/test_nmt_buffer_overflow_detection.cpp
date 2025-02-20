@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2021 SAP SE. All rights reserved.
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2022 SAP SE. All rights reserved.
+ * Copyright (c) 2022, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,22 +22,20 @@
  * questions.
  */
 
-#include "precompiled.hpp"
 #include "memory/allocation.hpp"
+#include "nmt/memTracker.hpp"
 #include "runtime/os.hpp"
-#include "services/memTracker.hpp"
+#include "sanitizers/address.hpp"
 #include "utilities/debug.hpp"
 #include "utilities/ostream.hpp"
 #include "unittest.hpp"
 #include "testutils.hpp"
 
-#if INCLUDE_NMT
+#if !INCLUDE_ASAN
 
 // This prefix shows up on any c heap corruption NMT detects. If unsure which assert will
 // come, just use this one.
 #define COMMON_NMT_HEAP_CORRUPTION_MESSAGE_PREFIX "NMT corruption"
-
-
 
 #define DEFINE_TEST(test_function, expected_assertion_message)                            \
   TEST_VM_FATAL_ERROR_MSG(NMT, test_function, ".*" expected_assertion_message ".*") {     \
@@ -113,7 +111,7 @@ DEFINE_TEST(test_double_free, "header canary")
 ///////
 
 static void test_invalid_block_address() {
-  // very low, like the result of an overflow or of accessing a NULL this pointer
+  // very low, like the result of an overflow or of accessing a null this pointer
   os::free((void*)0x100);
 }
 DEFINE_TEST(test_invalid_block_address, "invalid block address")
@@ -166,4 +164,4 @@ TEST_VM(NMT, test_realloc) {
   }
 }
 
-#endif // INCLUDE_NMT
+#endif // !INCLUDE_ASAN

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,6 @@ package java.lang.reflect;
 import jdk.internal.reflect.CallerSensitive;
 import jdk.internal.reflect.Reflection;
 
-import java.lang.invoke.MethodHandle;
 import java.util.Objects;
 
 /**
@@ -255,40 +254,13 @@ public interface InvocationHandler {
      * @throws Throwable anything thrown by the default method
 
      * @since 16
-     * @jvms 5.4.3. Method Resolution
+     * @jvms 5.4.3 Resolution
      */
     @CallerSensitive
     public static Object invokeDefault(Object proxy, Method method, Object... args)
             throws Throwable {
         Objects.requireNonNull(proxy);
         Objects.requireNonNull(method);
-
-        // verify that the object is actually a proxy instance
-        if (!Proxy.isProxyClass(proxy.getClass())) {
-            throw new IllegalArgumentException("'proxy' is not a proxy instance");
-        }
-        if (!method.isDefault()) {
-            throw new IllegalArgumentException("\"" + method + "\" is not a default method");
-        }
-        @SuppressWarnings("unchecked")
-        Class<? extends Proxy> proxyClass = (Class<? extends Proxy>)proxy.getClass();
-
-        Class<?> intf = method.getDeclaringClass();
-        // access check on the default method
-        method.checkAccess(Reflection.getCallerClass(), intf, proxyClass, method.getModifiers());
-
-        MethodHandle mh = Proxy.defaultMethodHandle(proxyClass, method);
-        // invoke the super method
-        try {
-            // the args array can be null if the number of formal parameters required by
-            // the method is zero (consistent with Method::invoke)
-            Object[] params = args != null ? args : Proxy.EMPTY_ARGS;
-            return mh.invokeExact(proxy, params);
-        } catch (ClassCastException | NullPointerException e) {
-            throw new IllegalArgumentException(e.getMessage(), e);
-        } catch (Proxy.InvocationException e) {
-            // unwrap and throw the exception thrown by the default method
-            throw e.getCause();
-        }
+        return Proxy.invokeDefault(proxy, method, args, Reflection.getCallerClass());
     }
 }

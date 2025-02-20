@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
 
 package sun.security.util;
 
-import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -179,6 +178,14 @@ public enum KnownOIDs {
     SHA3_256withRSA("2.16.840.1.101.3.4.3.14", "SHA3-256withRSA"),
     SHA3_384withRSA("2.16.840.1.101.3.4.3.15", "SHA3-384withRSA"),
     SHA3_512withRSA("2.16.840.1.101.3.4.3.16", "SHA3-512withRSA"),
+    ML_DSA_44("2.16.840.1.101.3.4.3.17", "ML-DSA-44"),
+    ML_DSA_65("2.16.840.1.101.3.4.3.18", "ML-DSA-65"),
+    ML_DSA_87("2.16.840.1.101.3.4.3.19", "ML-DSA-87"),
+
+    // kems 2.16.840.1.101.3.4.4.*
+    ML_KEM_512("2.16.840.1.101.3.4.4.1", "ML-KEM-512"),
+    ML_KEM_768("2.16.840.1.101.3.4.4.2", "ML-KEM-768"),
+    ML_KEM_1024("2.16.840.1.101.3.4.4.3", "ML-KEM-1024"),
 
     // RSASecurity
     // PKCS1 1.2.840.113549.1.1.*
@@ -240,6 +247,7 @@ public enum KnownOIDs {
     TimeStampTokenInfo("1.2.840.113549.1.9.16.1.4"),
     SigningCertificate("1.2.840.113549.1.9.16.2.12"),
     SignatureTimestampToken("1.2.840.113549.1.9.16.2.14"),
+    HSSLMS("1.2.840.113549.1.9.16.3.17", "HSS/LMS"),
     CHACHA20_POLY1305("1.2.840.113549.1.9.16.3.18", "CHACHA20-POLY1305"),
     FriendlyName("1.2.840.113549.1.9.20"),
     LocalKeyID("1.2.840.113549.1.9.21"),
@@ -268,7 +276,7 @@ public enum KnownOIDs {
     HmacSHA512$256("1.2.840.113549.2.13", "HmacSHA512/256"),
 
     // encryptionAlgs 1.2.840.113549.3.*
-    RC2$CBC$PKCS5Padding("1.2.840.113549.3.2", "RC2/CBC/PKCS5Padding"),
+    RC2$CBC$PKCS5Padding("1.2.840.113549.3.2", "RC2/CBC/PKCS5Padding", "RC2"),
     ARCFOUR("1.2.840.113549.3.4", "ARCFOUR", "RC4"),
     DESede$CBC$NoPadding("1.2.840.113549.3.7", "DESede/CBC/NoPadding"),
     RC5$CBC$PKCS5Padding("1.2.840.113549.3.9", "RC5/CBC/PKCS5Padding"),
@@ -427,11 +435,13 @@ public enum KnownOIDs {
     SkipIPAddress("1.3.6.1.4.1.42.2.11.2.1"),
     JAVASOFT_JDKKeyProtector("1.3.6.1.4.1.42.2.17.1.1"),
     JAVASOFT_JCEKeyProtector("1.3.6.1.4.1.42.2.19.1"),
-    MICROSOFT_ExportApproved("1.3.6.1.4.1.311.10.3.3");
+    MICROSOFT_ExportApproved("1.3.6.1.4.1.311.10.3.3"),
 
-    private String stdName;
-    private String oid;
-    private String[] aliases;
+    Blowfish("1.3.6.1.4.1.3029.1.1.2");
+
+    private final String stdName;
+    private final String oid;
+    private final String[] aliases;
 
     // find the matching enum using either name or oid string
     // return null if no match found
@@ -455,7 +465,7 @@ public enum KnownOIDs {
         }
         for (KnownOIDs o : KnownOIDs.values()) {
             register(o);
-        };
+        }
     }
 
     private static void register(KnownOIDs o) {
@@ -491,13 +501,13 @@ public enum KnownOIDs {
         }
     }
 
-    private KnownOIDs(String oid) {
+    KnownOIDs(String oid) {
         this.oid = oid;
         this.stdName = name(); // defaults to enum name
         this.aliases = new String[0];
     }
 
-    private KnownOIDs(String oid, String stdName, String ... aliases) {
+    KnownOIDs(String oid, String stdName, String... aliases) {
         this.oid = oid;
         this.stdName = stdName;
         this.aliases = aliases;

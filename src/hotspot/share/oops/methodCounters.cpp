@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,8 +21,9 @@
  * questions.
  *
  */
-#include "precompiled.hpp"
+
 #include "compiler/compiler_globals.hpp"
+#include "compiler/compilerOracle.hpp"
 #include "oops/method.hpp"
 #include "oops/methodCounters.hpp"
 #include "runtime/handles.inline.hpp"
@@ -30,7 +31,6 @@
 MethodCounters::MethodCounters(const methodHandle& mh) :
   _prev_time(0),
   _rate(0),
-  _nmethod_age(INT_MAX),
   _highest_comp_level(0),
   _highest_osr_comp_level(0)
 {
@@ -39,13 +39,9 @@ MethodCounters::MethodCounters(const methodHandle& mh) :
   invocation_counter()->init();
   backedge_counter()->init();
 
-  if (StressCodeAging) {
-    set_nmethod_age(HotMethodDetectionLimit);
-  }
-
   // Set per-method thresholds.
   double scale = 1.0;
-  CompilerOracle::has_option_value(mh, CompileCommand::CompileThresholdScaling, scale);
+  CompilerOracle::has_option_value(mh, CompileCommandEnum::CompileThresholdScaling, scale);
 
   _invoke_mask = right_n_bits(CompilerConfig::scaled_freq_log(Tier0InvokeNotifyFreqLog, scale)) << InvocationCounter::count_shift;
   _backedge_mask = right_n_bits(CompilerConfig::scaled_freq_log(Tier0BackedgeNotifyFreqLog, scale)) << InvocationCounter::count_shift;
@@ -53,19 +49,18 @@ MethodCounters::MethodCounters(const methodHandle& mh) :
 
 MethodCounters* MethodCounters::allocate_no_exception(const methodHandle& mh) {
   ClassLoaderData* loader_data = mh->method_holder()->class_loader_data();
-  return new(loader_data, method_counters_size(), MetaspaceObj::MethodCountersType) MethodCounters(mh);
+  return new(loader_data, size(), MetaspaceObj::MethodCountersType) MethodCounters(mh);
 }
 
 MethodCounters* MethodCounters::allocate_with_exception(const methodHandle& mh, TRAPS) {
   ClassLoaderData* loader_data = mh->method_holder()->class_loader_data();
-  return new(loader_data, method_counters_size(), MetaspaceObj::MethodCountersType, THREAD) MethodCounters(mh);
+  return new(loader_data, size(), MetaspaceObj::MethodCountersType, THREAD) MethodCounters(mh);
 }
 
 void MethodCounters::clear_counters() {
   invocation_counter()->reset();
   backedge_counter()->reset();
   set_interpreter_throwout_count(0);
-  set_nmethod_age(INT_MAX);
   set_prev_time(0);
   set_prev_event_count(0);
   set_rate(0);
@@ -74,7 +69,6 @@ void MethodCounters::clear_counters() {
 }
 
 void MethodCounters::print_value_on(outputStream* st) const {
-  assert(is_methodCounters(), "must be methodCounters");
   st->print("method counters");
   print_address_on(st);
 }

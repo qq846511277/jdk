@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "asm/macroAssembler.inline.hpp"
 #include "gc/shared/barrierSet.hpp"
 #include "gc/shared/cardTable.hpp"
@@ -112,14 +111,14 @@ void CardTableBarrierSetAssembler::store_check(MacroAssembler* masm, Register ob
     // entry and that entry is not properly handled by the relocation code.
     AddressLiteral cardtable((address)byte_map_base, relocInfo::none);
     Address index(noreg, obj, Address::times_1);
-    card_addr = __ as_Address(ArrayAddress(cardtable, index));
+    card_addr = __ as_Address(ArrayAddress(cardtable, index), rscratch1);
   }
 
   int dirty = CardTable::dirty_card_val();
   if (UseCondCardMark) {
     Label L_already_dirty;
     __ cmpb(card_addr, dirty);
-    __ jcc(Assembler::equal, L_already_dirty);
+    __ jccb(Assembler::equal, L_already_dirty);
     __ movb(card_addr, dirty);
     __ bind(L_already_dirty);
   } else {
@@ -128,7 +127,7 @@ void CardTableBarrierSetAssembler::store_check(MacroAssembler* masm, Register ob
 }
 
 void CardTableBarrierSetAssembler::oop_store_at(MacroAssembler* masm, DecoratorSet decorators, BasicType type,
-                                                Address dst, Register val, Register tmp1, Register tmp2) {
+                                                Address dst, Register val, Register tmp1, Register tmp2, Register tmp3) {
   bool in_heap = (decorators & IN_HEAP) != 0;
 
   bool is_array = (decorators & IS_ARRAY) != 0;
@@ -137,7 +136,7 @@ void CardTableBarrierSetAssembler::oop_store_at(MacroAssembler* masm, DecoratorS
 
   bool needs_post_barrier = val != noreg && in_heap;
 
-  BarrierSetAssembler::store_at(masm, decorators, type, dst, val, noreg, noreg);
+  BarrierSetAssembler::store_at(masm, decorators, type, dst, val, noreg, noreg, noreg);
   if (needs_post_barrier) {
     // flatten object address if needed
     if (!precise || (dst.index() == noreg && dst.disp() == 0)) {

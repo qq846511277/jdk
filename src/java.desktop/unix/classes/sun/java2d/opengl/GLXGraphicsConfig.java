@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -72,6 +72,7 @@ public final class GLXGraphicsConfig
     private long pConfigInfo;
     private ContextCapabilities oglCaps;
     private final OGLContext context;
+    private final SurfaceManager.ProxyCache surfaceDataProxyCache = new SurfaceManager.ProxyCache();
 
     private static native long getGLXConfigInfo(int screennum, int visualnum);
     private static native int getOGLCapabilities(long configInfo);
@@ -89,8 +90,8 @@ public final class GLXGraphicsConfig
     }
 
     @Override
-    public Object getProxyKey() {
-        return this;
+    public SurfaceManager.ProxyCache getSurfaceDataProxyCache() {
+        return surfaceDataProxyCache;
     }
 
     @Override
@@ -216,7 +217,7 @@ public final class GLXGraphicsConfig
     }
 
     /**
-     * The following methods are invoked from MToolkit or XToolkit.java and
+     * The following methods are invoked from XToolkit.java and
      * X11ComponentPeer.java rather than having the X11-dependent
      * implementations hardcoded in those classes.  This way the appropriate
      * actions are taken based on the peer's GraphicsConfig, whether it is

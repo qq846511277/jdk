@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,8 @@
  *
  */
 
-#include "precompiled.hpp"
+#include "opto/connode.hpp"
+#include "opto/loopnode.hpp"
 #include "opto/opaquenode.hpp"
 #include "opto/phaseX.hpp"
 
@@ -34,7 +35,7 @@ bool Opaque1Node::cmp( const Node &n ) const {
 }
 
 //------------------------------Identity---------------------------------------
-// Do NOT remove the opaque Node until no more loop ops can happen.
+// Do NOT remove the opaque node until no more loop opts can happen.
 Node* Opaque1Node::Identity(PhaseGVN* phase) {
   if (phase->C->post_loop_opts_phase()) {
     return in(1);
@@ -44,23 +45,65 @@ Node* Opaque1Node::Identity(PhaseGVN* phase) {
   return this;
 }
 
-//=============================================================================
-// A node to prevent unwanted optimizations.  Allows constant folding.  Stops
-// value-numbering, most Ideal calls or Identity functions.  This Node is
-// specifically designed to prevent the pre-increment value of a loop trip
-// counter from being live out of the bottom of the loop (hence causing the
-// pre- and post-increment values both being live and thus requiring an extra
-// temp register and an extra move).  If we "accidentally" optimize through
-// this kind of a Node, we'll get slightly pessimal, but correct, code.  Thus
-// it's OK to be slightly sloppy on optimizations here.
+#ifdef ASSERT
+CountedLoopNode* OpaqueZeroTripGuardNode::guarded_loop() const {
+  Node* iff = if_node();
+  ResourceMark rm;
+  Unique_Node_List wq;
+  wq.push(iff);
+  for (uint i = 0; i < wq.size(); ++i) {
+    Node* nn = wq.at(i);
+    for (DUIterator_Fast imax, i = nn->fast_outs(imax); i < imax; i++) {
+      Node* u = nn->fast_out(i);
+      if (u->is_OuterStripMinedLoop()) {
+        wq.push(u);
+      }
+      if (u->is_CountedLoop() && u->as_CountedLoop()->is_canonical_loop_entry() == this) {
+        return u->as_CountedLoop();
+      }
+      if (u->is_Region()) {
+        continue;
+      }
+      if (u->is_CFG()) {
+        wq.push(u);
+      }
+    }
+  }
+  return nullptr;
+}
+#endif
 
-// Do not allow value-numbering
-uint Opaque2Node::hash() const { return NO_HASH; }
-bool Opaque2Node::cmp( const Node &n ) const {
-  return (&n == this);          // Always fail except on self
+IfNode* OpaqueZeroTripGuardNode::if_node() const {
+  Node* cmp = unique_out();
+  assert(cmp->Opcode() == Op_CmpI, "");
+  Node* bol = cmp->unique_out();
+  assert(bol->Opcode() == Op_Bool, "");
+  Node* iff = bol->unique_out();
+  return iff->as_If();
 }
 
-const Type* Opaque4Node::Value(PhaseGVN* phase) const {
+const Type* OpaqueNotNullNode::Value(PhaseGVN* phase) const {
+  return phase->type(in(1));
+}
+
+Node* OpaqueTemplateAssertionPredicateNode::Identity(PhaseGVN* phase) {
+  if (phase->C->post_loop_opts_phase()) {
+    // Template Assertion Predicates only serve as templates to create Initialized Assertion Predicates when splitting
+    // a loop during loop opts. They are not used anymore once loop opts are over and can then be removed. They feed
+    // into the bool input of an If node and can thus be replaced by true to let the Template Assertion Predicate be
+    // folded away (the success path is always the true path by design).
+    return phase->intcon(1);
+  } else {
+    phase->C->record_for_post_loop_opts_igvn(this);
+  }
+  return this;
+}
+
+const Type* OpaqueTemplateAssertionPredicateNode::Value(PhaseGVN* phase) const {
+  return phase->type(in(1));
+}
+
+const Type* OpaqueInitializedAssertionPredicateNode::Value(PhaseGVN* phase) const {
   return phase->type(in(1));
 }
 
@@ -76,7 +119,7 @@ Node *ProfileBooleanNode::Ideal(PhaseGVN *phase, bool can_reshape) {
     _delay_removal = false;
     return this;
   } else {
-    return NULL;
+    return nullptr;
   }
 }
 

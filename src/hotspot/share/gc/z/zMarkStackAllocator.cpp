@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,9 +21,8 @@
  * questions.
  */
 
-#include "precompiled.hpp"
-#include "gc/shared/gcLogPrecious.hpp"
 #include "gc/shared/gc_globals.hpp"
+#include "gc/z/zInitialize.hpp"
 #include "gc/z/zLock.inline.hpp"
 #include "gc/z/zMarkStack.inline.hpp"
 #include "gc/z/zMarkStackAllocator.hpp"
@@ -32,10 +31,8 @@
 #include "runtime/os.hpp"
 #include "utilities/debug.hpp"
 
-uintptr_t ZMarkStackSpaceStart;
-
-ZMarkStackSpace::ZMarkStackSpace() :
-    _expand_lock(),
+ZMarkStackSpace::ZMarkStackSpace()
+  : _expand_lock(),
     _start(0),
     _top(0),
     _end(0) {
@@ -45,15 +42,12 @@ ZMarkStackSpace::ZMarkStackSpace() :
   const size_t size = ZMarkStackSpaceLimit;
   const uintptr_t addr = (uintptr_t)os::reserve_memory(size, !ExecMem, mtGC);
   if (addr == 0) {
-    log_error_pd(gc, marking)("Failed to reserve address space for mark stacks");
+    ZInitialize::error_d("Failed to reserve address space for mark stacks");
     return;
   }
 
   // Successfully initialized
   _start = _top = _end = addr;
-
-  // Register mark stack space start
-  ZMarkStackSpaceStart = _start;
 
   // Prime space
   _end += expand_space();
@@ -61,6 +55,10 @@ ZMarkStackSpace::ZMarkStackSpace() :
 
 bool ZMarkStackSpace::is_initialized() const {
   return _start != 0;
+}
+
+uintptr_t ZMarkStackSpace::start() const {
+  return _start;
 }
 
 size_t ZMarkStackSpace::size() const {
@@ -80,11 +78,11 @@ size_t ZMarkStackSpace::expand_space() {
     // Expansion limit reached. This is a fatal error since we
     // currently can't recover from running out of mark stack space.
     fatal("Mark stack space exhausted. Use -XX:ZMarkStackSpaceLimit=<size> to increase the "
-          "maximum number of bytes allocated for mark stacks. Current limit is " SIZE_FORMAT "M.",
+          "maximum number of bytes allocated for mark stacks. Current limit is %zuM.",
           ZMarkStackSpaceLimit / M);
   }
 
-  log_debug(gc, marking)("Expanding mark stack space: " SIZE_FORMAT "M->" SIZE_FORMAT "M",
+  log_debug(gc, marking)("Expanding mark stack space: %zuM->%zuM",
                          old_size / M, new_size / M);
 
   // Expand
@@ -101,7 +99,7 @@ size_t ZMarkStackSpace::shrink_space() {
 
   if (shrink_size > 0) {
     // Shrink
-    log_debug(gc, marking)("Shrinking mark stack space: " SIZE_FORMAT "M->" SIZE_FORMAT "M",
+    log_debug(gc, marking)("Shrinking mark stack space: %zuM->%zuM",
                            old_size / M, new_size / M);
 
     const uintptr_t shrink_start = _end - shrink_size;
@@ -147,7 +145,7 @@ uintptr_t ZMarkStackSpace::expand_and_alloc_space(size_t size) {
 
   // Increment top before end to make sure another
   // thread can't steal out newly expanded space.
-  addr = Atomic::fetch_and_add(&_top, size);
+  addr = Atomic::fetch_then_add(&_top, size);
   Atomic::add(&_end, expand_size);
 
   return addr;
@@ -169,12 +167,17 @@ void ZMarkStackSpace::free() {
   _top = _start;
 }
 
-ZMarkStackAllocator::ZMarkStackAllocator() :
-    _freelist(),
-    _space() {}
+ZMarkStackAllocator::ZMarkStackAllocator()
+  : _space(),
+    _freelist(_space.start()),
+    _expanded_recently(false) {}
 
 bool ZMarkStackAllocator::is_initialized() const {
   return _space.is_initialized();
+}
+
+uintptr_t ZMarkStackAllocator::start() const {
+  return _space.start();
 }
 
 size_t ZMarkStackAllocator::size() const {
@@ -198,17 +201,29 @@ ZMarkStackMagazine* ZMarkStackAllocator::create_magazine_from_space(uintptr_t ad
 ZMarkStackMagazine* ZMarkStackAllocator::alloc_magazine() {
   // Try allocating from the free list first
   ZMarkStackMagazine* const magazine = _freelist.pop();
-  if (magazine != NULL) {
+  if (magazine != nullptr) {
     return magazine;
+  }
+
+  if (!Atomic::load(&_expanded_recently)) {
+    Atomic::cmpxchg(&_expanded_recently, false, true);
   }
 
   // Allocate new magazine
   const uintptr_t addr = _space.alloc(ZMarkStackMagazineSize);
   if (addr == 0) {
-    return NULL;
+    return nullptr;
   }
 
   return create_magazine_from_space(addr, ZMarkStackMagazineSize);
+}
+
+bool ZMarkStackAllocator::clear_and_get_expanded_recently() {
+  if (!Atomic::load(&_expanded_recently)) {
+    return false;
+  }
+
+  return Atomic::cmpxchg(&_expanded_recently, true, false);
 }
 
 void ZMarkStackAllocator::free_magazine(ZMarkStackMagazine* magazine) {

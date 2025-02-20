@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -67,11 +67,10 @@ public class TestPrintReferences {
     }
 
     public static void testRefs() throws Exception {
-        ProcessBuilder pb_enabled = ProcessTools.createJavaProcessBuilder("-Xlog:gc+ref+phases=debug",
-                                                                          "-XX:+UseG1GC",
-                                                                          "-Xmx32M",
-                                                                          GCTest.class.getName());
-        OutputAnalyzer output = new OutputAnalyzer(pb_enabled.start());
+        OutputAnalyzer output = ProcessTools.executeLimitedTestJava("-Xlog:gc+ref+phases=debug",
+                                                                    "-XX:+UseG1GC",
+                                                                    "-Xmx32M",
+                                                                    GCTest.class.getName());
 
         checkRefsLogFormat(output);
 
@@ -80,9 +79,11 @@ public class TestPrintReferences {
 
     private static String refRegex(String reftype) {
         String countRegex = "[0-9]+";
-        return gcLogTimeRegex + indent(6) + reftype + ":\n" +
-               gcLogTimeRegex + indent(8) + "Discovered: " + countRegex + "\n" +
-               gcLogTimeRegex + indent(8) + "Cleared: " + countRegex + "\n";
+        return gcLogTimeRegex + indent(6) + reftype + " " +
+               "Discovered: " + countRegex + ", " +
+               "Dropped: "    + countRegex + ", " +
+               "Processed: "  + countRegex + "\n"
+               ;
     }
 
     private static void checkRefsLogFormat(OutputAnalyzer output) {
@@ -93,14 +94,13 @@ public class TestPrintReferences {
     }
 
     public static void testPhases(boolean parallelRefProcEnabled) throws Exception {
-        ProcessBuilder pb_enabled = ProcessTools.createJavaProcessBuilder("-Xlog:gc+phases+ref=debug",
-                                                                          "-XX:+UseG1GC",
-                                                                          "-Xmx32M",
-                                                                          "-XX:" + (parallelRefProcEnabled ? "+" : "-") + "ParallelRefProcEnabled",
-                                                                          "-XX:-UseDynamicNumberOfGCThreads",
-                                                                          "-XX:ParallelGCThreads=2",
-                                                                          GCTest.class.getName());
-        OutputAnalyzer output = new OutputAnalyzer(pb_enabled.start());
+        OutputAnalyzer output = ProcessTools.executeLimitedTestJava("-Xlog:gc+phases+ref=debug",
+                                                                    "-XX:+UseG1GC",
+                                                                    "-Xmx32M",
+                                                                    "-XX:" + (parallelRefProcEnabled ? "+" : "-") + "ParallelRefProcEnabled",
+                                                                    "-XX:-UseDynamicNumberOfGCThreads",
+                                                                    "-XX:ParallelGCThreads=2",
+                                                                    GCTest.class.getName());
 
         checkLogFormat(output, parallelRefProcEnabled);
         checkLogValue(output);

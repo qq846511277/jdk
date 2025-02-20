@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "classfile/javaClasses.hpp"
 #include "classfile/vmClasses.hpp"
 #include "classfile/vmSymbols.hpp"
@@ -50,8 +49,8 @@ class StatSamplerTask : public PeriodicTask {
 //----------------------------------------------------------
 // Implementation of StatSampler
 
-StatSamplerTask*              StatSampler::_task   = NULL;
-PerfDataList*                 StatSampler::_sampled = NULL;
+StatSamplerTask*              StatSampler::_task   = nullptr;
+PerfDataList*                 StatSampler::_sampled = nullptr;
 
 /*
  * the initialize method is called from the engage() method
@@ -107,7 +106,7 @@ void StatSampler::disengage() {
   // remove StatSamplerTask
   _task->disenroll();
   delete _task;
-  _task = NULL;
+  _task = nullptr;
 
   // force a final sample
   sample_data(_sampled);
@@ -123,9 +122,9 @@ void StatSampler::destroy() {
 
   if (!UsePerfData) return;
 
-  if (_sampled != NULL) {
+  if (_sampled != nullptr) {
     delete(_sampled);
-    _sampled = NULL;
+    _sampled = nullptr;
   }
 }
 
@@ -135,7 +134,7 @@ void StatSampler::destroy() {
  */
 void StatSampler::sample_data(PerfDataList* list) {
 
-  assert(list != NULL, "null list unexpected");
+  assert(list != nullptr, "null list unexpected");
 
   for (int index = 0; index < list->length(); index++) {
     PerfData* item = list->at(index);
@@ -161,14 +160,14 @@ void StatSampler::collect_sample() {
   //
   // if (PerfDataManager::count() > previous) {
   //   // get a new copy of the sampled list
-  //   if (_sampled != NULL) {
+  //   if (_sampled != nullptr) {
   //     delete(_sampled);
-  //     _sampled = NULL;
+  //     _sampled = nullptr;
   //   }
   //   _sampled = PerfDataManager::sampled();
   // }
 
-  assert(_sampled != NULL, "list not initialized");
+  assert(_sampled != nullptr, "list not initialized");
 
   sample_data(_sampled);
 }
@@ -196,12 +195,13 @@ void StatSampler::assert_system_property(const char* name, const char* value, TR
                          CHECK);
 
   oop value_oop = result.get_oop();
-  assert(value_oop != NULL, "property must have a value");
+  assert(value_oop != nullptr, "property must have a value");
 
   // convert Java String to utf8 string
   char* system_value = java_lang_String::as_utf8_string(value_oop);
 
-  assert(strcmp(value, system_value) == 0, "property value mustn't differ from System.getProperty");
+  assert(strcmp(value, system_value) == 0, "property value mustn't differ from System.getProperty. Our value is: %s, System.getProperty is: %s",
+         value, system_value);
 #endif // ASSERT
 }
 
@@ -211,9 +211,9 @@ void StatSampler::assert_system_property(const char* name, const char* value, TR
  */
 void StatSampler::add_property_constant(CounterNS name_space, const char* name, const char* value, TRAPS) {
   // the property must exist
-  assert(value != NULL, "property name should be have a value: %s", name);
+  assert(value != nullptr, "property name should be have a value: %s", name);
   assert_system_property(name, value, CHECK);
-  if (value != NULL) {
+  if (value != nullptr) {
     // create the property counter
     PerfDataManager::create_string_constant(name_space, name, value, CHECK);
   }
@@ -226,6 +226,19 @@ void StatSampler::add_property_constant(CounterNS name_space, const char* name, 
  */
 void StatSampler::add_property_constant(CounterNS name_space, const char* name, TRAPS) {
   add_property_constant(name_space, name, Arguments::get_property(name), CHECK);
+}
+
+/*
+ * Adds a string constant of the given property. Retrieves the value via
+ * Arguments::get_property() and asserts the value for the does not differ from
+ * the value retrievable from System.getProperty()
+ */
+void StatSampler::add_optional_property_constant(CounterNS name_space, const char* name, TRAPS) {
+  const char* value = Arguments::get_property(name);
+
+  if (value != nullptr) {
+    add_property_constant(name_space, name, value, CHECK);
+  }
 }
 
 /*
@@ -260,6 +273,10 @@ void StatSampler::create_system_property_instrumentation(TRAPS) {
   add_property_constant(JAVA_PROPERTY, "java.library.path", CHECK);
   add_property_constant(JAVA_PROPERTY, "java.class.path", CHECK);
   add_property_constant(JAVA_PROPERTY, "java.home", CHECK);
+
+  add_optional_property_constant(JAVA_PROPERTY, "jdk.module.path", CHECK);
+  add_optional_property_constant(JAVA_PROPERTY, "jdk.module.upgrade.path", CHECK);
+  add_optional_property_constant(JAVA_PROPERTY, "jdk.module.main", CHECK);
 }
 
 /*
@@ -292,7 +309,7 @@ void StatSampler::create_misc_perfdata() {
                                           Arguments::jvm_args(), CHECK);
 
   // java class name/jar file and arguments to main class
-  // note: name is cooridnated with launcher and Arguments.cpp
+  // note: name is coordinated with launcher and Arguments.cpp
   PerfDataManager::create_string_constant(SUN_RT, "javaCommand",
                                           Arguments::java_command(), CHECK);
 

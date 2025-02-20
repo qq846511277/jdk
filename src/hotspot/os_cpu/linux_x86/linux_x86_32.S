@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2004, 2017, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2004, 2024, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -21,150 +21,29 @@
 # questions.
 #
 
+#include "defs.S.inc"
 
         # NOTE WELL!  The _Copy functions are called directly
-	# from server-compiler-generated code via CallLeafNoFP,
-	# which means that they *must* either not use floating
-	# point or use it in the same manner as does the server
-	# compiler.
+        # from server-compiler-generated code via CallLeafNoFP,
+        # which means that they *must* either not use floating
+        # point or use it in the same manner as does the server
+        # compiler.
 
-        .globl _Copy_conjoint_bytes
-        .globl _Copy_arrayof_conjoint_bytes
-        .globl _Copy_conjoint_jshorts_atomic
-	.globl _Copy_arrayof_conjoint_jshorts
-        .globl _Copy_conjoint_jints_atomic
-        .globl _Copy_arrayof_conjoint_jints
-	.globl _Copy_conjoint_jlongs_atomic
-	.globl _mmx_Copy_arrayof_conjoint_jshorts
+        .text
 
-        .globl _Atomic_cmpxchg_long
-        .globl _Atomic_move_long
-
-	.text
-
-        .globl  SpinPause
-	.type   SpinPause,@function
         .p2align 4,,15
-SpinPause:
+DECLARE_FUNC(SpinPause):
         rep
         nop
         movl    $1, %eax
-        ret
-
-        # Support for void Copy::conjoint_bytes(void* from,
-        #                                       void* to,
-        #                                       size_t count)
-        .p2align 4,,15
-	.type    _Copy_conjoint_bytes,@function
-_Copy_conjoint_bytes:
-        pushl    %esi
-        movl     4+12(%esp),%ecx      # count
-        pushl    %edi
-        movl     8+ 4(%esp),%esi      # from
-        movl     8+ 8(%esp),%edi      # to
-        cmpl     %esi,%edi
-        leal     -1(%esi,%ecx),%eax   # from + count - 1
-        jbe      cb_CopyRight
-        cmpl     %eax,%edi
-        jbe      cb_CopyLeft
-        # copy from low to high
-cb_CopyRight:
-        cmpl     $3,%ecx
-        jbe      5f                   # <= 3 bytes
-        # align source address at dword address boundary
-        movl     %ecx,%eax            # original count
-        movl     $4,%ecx
-        subl     %esi,%ecx
-        andl     $3,%ecx              # prefix byte count
-        jz       1f                   # no prefix
-        subl     %ecx,%eax            # byte count less prefix
-        # copy prefix
-        subl     %esi,%edi
-0:      movb     (%esi),%dl
-        movb     %dl,(%edi,%esi,1)
-        addl     $1,%esi
-        subl     $1,%ecx
-        jnz      0b
-        addl     %esi,%edi
-1:      movl     %eax,%ecx            # byte count less prefix
-        shrl     $2,%ecx              # dword count
-        jz       4f                   # no dwords to move
-        cmpl     $32,%ecx
-        jbe      2f                   # <= 32 dwords
-        # copy aligned dwords
-        rep;     smovl
-        jmp      4f
-        # copy aligned dwords
-2:      subl     %esi,%edi
-        .p2align 4,,15
-3:      movl     (%esi),%edx
-        movl     %edx,(%edi,%esi,1)
-        addl     $4,%esi
-        subl     $1,%ecx
-        jnz      3b
-        addl     %esi,%edi
-4:      movl     %eax,%ecx            # byte count less prefix
-5:      andl     $3,%ecx              # suffix byte count
-        jz       7f                   # no suffix
-        # copy suffix
-        xorl     %eax,%eax
-6:      movb     (%esi,%eax,1),%dl
-        movb     %dl,(%edi,%eax,1)
-        addl     $1,%eax
-        subl     $1,%ecx
-        jnz      6b
-7:      popl     %edi
-        popl     %esi
-        ret
-        # copy from high to low
-cb_CopyLeft:
-        std
-        leal     -4(%edi,%ecx),%edi   # to + count - 4
-        movl     %eax,%esi            # from + count - 1
-        movl     %ecx,%eax
-        subl     $3,%esi              # from + count - 4
-        cmpl     $3,%ecx
-        jbe      5f                   # <= 3 bytes
-1:      shrl     $2,%ecx              # dword count
-        jz       4f                   # no dwords to move
-        cmpl     $32,%ecx
-        ja       3f                   # > 32 dwords
-        # copy dwords, aligned or not
-        subl     %esi,%edi
-        .p2align 4,,15
-2:      movl     (%esi),%edx
-        movl     %edx,(%edi,%esi,1)
-        subl     $4,%esi
-        subl     $1,%ecx
-        jnz      2b
-        addl     %esi,%edi
-        jmp      4f
-        # copy dwords, aligned or not
-3:      rep;     smovl
-4:      movl     %eax,%ecx            # byte count
-5:      andl     $3,%ecx              # suffix byte count
-        jz       7f                   # no suffix
-        # copy suffix
-        subl     %esi,%edi
-        addl     $3,%esi
-6:      movb     (%esi),%dl
-        movb     %dl,(%edi,%esi,1)
-	subl     $1,%esi
-        subl     $1,%ecx
-        jnz      6b
-7:      cld
-        popl     %edi
-        popl     %esi
         ret
 
         # Support for void Copy::arrayof_conjoint_bytes(void* from,
         #                                               void* to,
         #                                               size_t count)
         #
-        # Same as _Copy_conjoint_bytes, except no source alignment check.
         .p2align 4,,15
-	.type    _Copy_arrayof_conjoint_bytes,@function
-_Copy_arrayof_conjoint_bytes:
+DECLARE_FUNC(_Copy_arrayof_conjoint_bytes):
         pushl    %esi
         movl     4+12(%esp),%ecx      # count
         pushl    %edi
@@ -223,7 +102,7 @@ acb_CopyLeft:
         jbe      2f                   # <= 32 dwords
         rep;     smovl
         jmp      4f
-	.space 8
+        .space 8
 2:      subl     %esi,%edi
         .p2align 4,,15
 3:      movl     (%esi),%edx
@@ -239,7 +118,7 @@ acb_CopyLeft:
         addl     $3,%esi
 6:      movb     (%esi),%dl
         movb     %dl,(%edi,%esi,1)
-	subl     $1,%esi
+        subl     $1,%esi
         subl     $1,%ecx
         jnz      6b
 7:      cld
@@ -251,8 +130,7 @@ acb_CopyLeft:
         #                                                void* to,
         #                                                size_t count)
         .p2align 4,,15
-	.type    _Copy_conjoint_jshorts_atomic,@function
-_Copy_conjoint_jshorts_atomic:
+DECLARE_FUNC(_Copy_conjoint_jshorts_atomic):
         pushl    %esi
         movl     4+12(%esp),%ecx      # count
         pushl    %edi
@@ -338,8 +216,7 @@ cs_CopyLeft:
         #                                                 void* to,
         #                                                 size_t count)
         .p2align 4,,15
-	.type    _Copy_arrayof_conjoint_jshorts,@function
-_Copy_arrayof_conjoint_jshorts:
+DECLARE_FUNC(_Copy_arrayof_conjoint_jshorts):
         pushl    %esi
         movl     4+12(%esp),%ecx      # count
         pushl    %edi
@@ -415,10 +292,8 @@ acs_CopyLeft:
         # Equivalent to
         #   arrayof_conjoint_jints
         .p2align 4,,15
-	.type    _Copy_conjoint_jints_atomic,@function
-	.type    _Copy_arrayof_conjoint_jints,@function
-_Copy_conjoint_jints_atomic:
-_Copy_arrayof_conjoint_jints:
+DECLARE_FUNC(_Copy_conjoint_jints_atomic):
+DECLARE_FUNC(_Copy_arrayof_conjoint_jints):
         pushl    %esi
         movl     4+12(%esp),%ecx      # count
         pushl    %edi
@@ -492,8 +367,7 @@ ci_CopyLeft:
         # }
         */
         .p2align 4,,15
-	.type    _Copy_conjoint_jlongs_atomic,@function
-_Copy_conjoint_jlongs_atomic:
+DECLARE_FUNC(_Copy_conjoint_jlongs_atomic):
         movl     4+8(%esp),%ecx       # count
         movl     4+0(%esp),%eax       # from
         movl     4+4(%esp),%edx       # to
@@ -521,8 +395,7 @@ cla_CopyLeft:
         #                                                 void* to,
         #                                                 size_t count)
         .p2align 4,,15
-	.type    _mmx_Copy_arrayof_conjoint_jshorts,@function
-_mmx_Copy_arrayof_conjoint_jshorts:
+DECLARE_FUNC(_mmx_Copy_arrayof_conjoint_jshorts):
         pushl    %esi
         movl     4+12(%esp),%ecx
         pushl    %edi
@@ -573,8 +446,8 @@ mmx_acs_CopyRight:
         cmpl     $16,%ecx
         jge      4b
         emms
-	testl    %ecx,%ecx
-	ja       1b
+        testl    %ecx,%ecx
+        ja       1b
 5:      andl     $1,%eax
         je       7f
 6:      movw     (%esi),%dx
@@ -619,8 +492,7 @@ mmx_acs_CopyLeft:
         #                                   jlong exchange_value)
         #
         .p2align 4,,15
-	.type    _Atomic_cmpxchg_long,@function
-_Atomic_cmpxchg_long:
+DECLARE_FUNC(_Atomic_cmpxchg_long):
                                    #  8(%esp) : return PC
         pushl    %ebx              #  4(%esp) : old %ebx
         pushl    %edi              #  0(%esp) : old %edi
@@ -638,8 +510,7 @@ _Atomic_cmpxchg_long:
         # Support for jlong Atomic::load and Atomic::store.
         # void _Atomic_move_long(const volatile jlong* src, volatile jlong* dst)
         .p2align 4,,15
-	.type    _Atomic_move_long,@function
-_Atomic_move_long:
+DECLARE_FUNC(_Atomic_move_long):
         movl     4(%esp), %eax   # src
         fildll    (%eax)
         movl     8(%esp), %eax   # dest

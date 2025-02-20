@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,8 +23,11 @@
 
 /*
  * @test
+ * @key randomness
+ *
+ * @library /test/lib
  * @modules jdk.incubator.vector
- * @run testng/othervm -ea -esa -Xbatch -XX:-TieredCompilation Int128VectorTests
+ * @run testng/othervm/timeout=300 -ea -esa -Xbatch -XX:-TieredCompilation Int128VectorTests
  */
 
 // -- This file was mechanically generated: Do not edit! -- //
@@ -35,6 +38,7 @@ import jdk.incubator.vector.VectorShuffle;
 import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.Vector;
+import jdk.incubator.vector.VectorMath;
 
 import jdk.incubator.vector.IntVector;
 
@@ -60,7 +64,17 @@ public class Int128VectorTests extends AbstractVectorTest {
     static final int INVOC_COUNT = Integer.getInteger("jdk.incubator.vector.test.loop-iterations", 100);
 
 
+    private static final int CONST_SHIFT = Integer.SIZE / 2;
+
     static final int BUFFER_REPS = Integer.getInteger("jdk.incubator.vector.test.buffer-vectors", 25000 / 128);
+
+    static void assertArraysStrictlyEquals(int[] r, int[] a) {
+        for (int i = 0; i < a.length; i++) {
+            if (r[i] != a[i]) {
+                Assert.fail("at index #" + i + ", expected = " + a[i] + ", actual = " + r[i]);
+            }
+        }
+    }
 
     interface FUnOp {
         int apply(int a);
@@ -226,25 +240,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-    static void assertInsertArraysEquals(int[] r, int[] a, int element, int index, int start, int end) {
-        int i = start;
-        try {
-            for (; i < end; i += 1) {
-                if(i%SPECIES.length() == index) {
-                    Assert.assertEquals(r[i], element);
-                } else {
-                    Assert.assertEquals(r[i], a[i]);
-                }
-            }
-        } catch (AssertionError e) {
-            if (i%SPECIES.length() == index) {
-                Assert.assertEquals(r[i], element, "at index #" + i);
-            } else {
-                Assert.assertEquals(r[i], a[i], "at index #" + i);
-            }
-        }
-    }
-
     static void assertRearrangeArraysEquals(int[] r, int[] a, int[] order, int vector_len) {
         int i = 0, j = 0;
         try {
@@ -256,6 +251,74 @@ public class Int128VectorTests extends AbstractVectorTest {
         } catch (AssertionError e) {
             int idx = i + j;
             Assert.assertEquals(r[i+j], a[i+order[i+j]], "at index #" + idx + ", input = " + a[i+order[i+j]]);
+        }
+    }
+
+    static void assertcompressArraysEquals(int[] r, int[] a, boolean[] m, int vector_len) {
+        int i = 0, j = 0, k = 0;
+        try {
+            for (; i < a.length; i += vector_len) {
+                k = 0;
+                for (j = 0; j < vector_len; j++) {
+                    if (m[(i + j) % SPECIES.length()]) {
+                        Assert.assertEquals(r[i + k], a[i + j]);
+                        k++;
+                    }
+                }
+                for (; k < vector_len; k++) {
+                    Assert.assertEquals(r[i + k], (int)0);
+                }
+            }
+        } catch (AssertionError e) {
+            int idx = i + k;
+            if (m[(i + j) % SPECIES.length()]) {
+                Assert.assertEquals(r[idx], a[i + j], "at index #" + idx);
+            } else {
+                Assert.assertEquals(r[idx], (int)0, "at index #" + idx);
+            }
+        }
+    }
+
+    static void assertexpandArraysEquals(int[] r, int[] a, boolean[] m, int vector_len) {
+        int i = 0, j = 0, k = 0;
+        try {
+            for (; i < a.length; i += vector_len) {
+                k = 0;
+                for (j = 0; j < vector_len; j++) {
+                    if (m[(i + j) % SPECIES.length()]) {
+                        Assert.assertEquals(r[i + j], a[i + k]);
+                        k++;
+                    } else {
+                        Assert.assertEquals(r[i + j], (int)0);
+                    }
+                }
+            }
+        } catch (AssertionError e) {
+            int idx = i + j;
+            if (m[idx % SPECIES.length()]) {
+                Assert.assertEquals(r[idx], a[i + k], "at index #" + idx);
+            } else {
+                Assert.assertEquals(r[idx], (int)0, "at index #" + idx);
+            }
+        }
+    }
+
+    static void assertSelectFromTwoVectorEquals(int[] r, int[] order, int[] a, int[] b, int vector_len) {
+        int i = 0, j = 0;
+        boolean is_exceptional_idx = false;
+        int idx = 0, wrapped_index = 0, oidx = 0;
+        try {
+            for (; i < a.length; i += vector_len) {
+                for (j = 0; j < vector_len; j++) {
+                    idx = i + j;
+                    wrapped_index = Math.floorMod((int)order[idx], 2 * vector_len);
+                    is_exceptional_idx = wrapped_index >= vector_len;
+                    oidx = is_exceptional_idx ? (wrapped_index - vector_len) : wrapped_index;
+                    Assert.assertEquals(r[idx], (is_exceptional_idx ? b[i + oidx] : a[i + oidx]));
+                }
+            }
+        } catch (AssertionError e) {
+            Assert.assertEquals(r[idx], (is_exceptional_idx ? b[i + oidx] : a[i + oidx]), "at index #" + idx + ", order = " + order[idx] + ", a = " + a[i + oidx] + ", b = " + b[i + oidx]);
         }
     }
 
@@ -460,6 +523,50 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
+    interface FBinConstOp {
+        int apply(int a);
+    }
+
+    interface FBinConstMaskOp {
+        int apply(int a, boolean m);
+
+        static FBinConstMaskOp lift(FBinConstOp f) {
+            return (a, m) -> m ? f.apply(a) : a;
+        }
+    }
+
+    static void assertShiftConstEquals(int[] r, int[] a, FBinConstOp f) {
+        int i = 0;
+        int j = 0;
+        try {
+            for (; j < a.length; j += SPECIES.length()) {
+                for (i = 0; i < SPECIES.length(); i++) {
+                    Assert.assertEquals(r[i+j], f.apply(a[i+j]));
+                }
+            }
+        } catch (AssertionError e) {
+            Assert.assertEquals(r[i+j], f.apply(a[i+j]), "at index #" + i + ", " + j);
+        }
+    }
+
+    static void assertShiftConstEquals(int[] r, int[] a, boolean[] mask, FBinConstOp f) {
+        assertShiftConstEquals(r, a, mask, FBinConstMaskOp.lift(f));
+    }
+
+    static void assertShiftConstEquals(int[] r, int[] a, boolean[] mask, FBinConstMaskOp f) {
+        int i = 0;
+        int j = 0;
+        try {
+            for (; j < a.length; j += SPECIES.length()) {
+                for (i = 0; i < SPECIES.length(); i++) {
+                    Assert.assertEquals(r[i+j], f.apply(a[i+j], mask[i]));
+                }
+            }
+        } catch (AssertionError err) {
+            Assert.assertEquals(r[i+j], f.apply(a[i+j], mask[i]), "at index #" + i + ", input1 = " + a[i+j] + ", mask = " + mask[i]);
+        }
+    }
+
     interface FTernOp {
         int apply(int a, int b, int c);
     }
@@ -605,21 +712,6 @@ public class Int128VectorTests extends AbstractVectorTest {
     }
 
 
-
-    interface FBinArrayOp {
-        int apply(int[] a, int b);
-    }
-
-    static void assertArraysEquals(int[] r, int[] a, FBinArrayOp f) {
-        int i = 0;
-        try {
-            for (; i < a.length; i++) {
-                Assert.assertEquals(r[i], f.apply(a, i));
-            }
-        } catch (AssertionError e) {
-            Assert.assertEquals(r[i], f.apply(a,i), "at index #" + i);
-        }
-    }
 
     interface FGatherScatterOp {
         int[] apply(int[] a, int ix, int[] b, int iy);
@@ -838,7 +930,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
     static int bits(int e) {
         return  e;
     }
@@ -862,11 +953,43 @@ public class Int128VectorTests extends AbstractVectorTest {
             })
     );
 
+    static final List<IntFunction<int[]>> INT_SATURATING_GENERATORS = List.of(
+            withToString("int[Integer.MIN_VALUE]", (int s) -> {
+                return fill(s * BUFFER_REPS,
+                            i -> (int)(Integer.MIN_VALUE));
+            }),
+            withToString("int[Integer.MAX_VALUE]", (int s) -> {
+                return fill(s * BUFFER_REPS,
+                            i -> (int)(Integer.MAX_VALUE));
+            }),
+            withToString("int[Integer.MAX_VALUE - 100]", (int s) -> {
+                return fill(s * BUFFER_REPS,
+                            i -> (int)(Integer.MAX_VALUE - 100));
+            }),
+            withToString("int[Integer.MIN_VALUE + 100]", (int s) -> {
+                return fill(s * BUFFER_REPS,
+                            i -> (int)(Integer.MIN_VALUE + 100));
+            }),
+            withToString("int[-i * 5]", (int s) -> {
+                return fill(s * BUFFER_REPS,
+                            i -> (int)(-i * 5));
+            }),
+            withToString("int[i * 5]", (int s) -> {
+                return fill(s * BUFFER_REPS,
+                            i -> (int)(i * 5));
+            })
+    );
+
     // Create combinations of pairs
     // @@@ Might be sensitive to order e.g. div by 0
     static final List<List<IntFunction<int[]>>> INT_GENERATOR_PAIRS =
         Stream.of(INT_GENERATORS.get(0)).
                 flatMap(fa -> INT_GENERATORS.stream().skip(1).map(fb -> List.of(fa, fb))).
+                collect(Collectors.toList());
+
+    static final List<List<IntFunction<int[]>>> INT_SATURATING_GENERATOR_PAIRS =
+        Stream.of(INT_GENERATORS.get(0)).
+                flatMap(fa -> INT_SATURATING_GENERATORS.stream().skip(1).map(fb -> List.of(fa, fb))).
                 collect(Collectors.toList());
 
     @DataProvider
@@ -881,6 +1004,18 @@ public class Int128VectorTests extends AbstractVectorTest {
                 flatMap(pair -> INT_GENERATORS.stream().map(f -> List.of(pair.get(0), pair.get(1), f))).
                 collect(Collectors.toList());
 
+    static final List<IntFunction<int[]>> SELECT_FROM_INDEX_GENERATORS = List.of(
+            withToString("int[0..VECLEN*2)", (int s) -> {
+                return fill(s * BUFFER_REPS,
+                            i -> (int)(RAND.nextInt()));
+            })
+    );
+
+    static final List<List<IntFunction<int[]>>> INT_GENERATOR_SELECT_FROM_TRIPLES =
+        INT_GENERATOR_PAIRS.stream().
+                flatMap(pair -> SELECT_FROM_INDEX_GENERATORS.stream().map(f -> List.of(pair.get(0), pair.get(1), f))).
+                collect(Collectors.toList());
+
     @DataProvider
     public Object[][] intBinaryOpProvider() {
         return INT_GENERATOR_PAIRS.stream().map(List::toArray).
@@ -888,8 +1023,23 @@ public class Int128VectorTests extends AbstractVectorTest {
     }
 
     @DataProvider
+    public Object[][] intSaturatingBinaryOpProvider() {
+        return INT_SATURATING_GENERATOR_PAIRS.stream().map(List::toArray).
+                toArray(Object[][]::new);
+    }
+
+    @DataProvider
     public Object[][] intIndexedOpProvider() {
         return INT_GENERATOR_PAIRS.stream().map(List::toArray).
+                toArray(Object[][]::new);
+    }
+
+    @DataProvider
+    public Object[][] intSaturatingBinaryOpMaskProvider() {
+        return BOOLEAN_MASK_GENERATORS.stream().
+                flatMap(fm -> INT_SATURATING_GENERATOR_PAIRS.stream().map(lfa -> {
+                    return Stream.concat(lfa.stream(), Stream.of(fm)).toArray();
+                })).
                 toArray(Object[][]::new);
     }
 
@@ -905,6 +1055,12 @@ public class Int128VectorTests extends AbstractVectorTest {
     @DataProvider
     public Object[][] intTernaryOpProvider() {
         return INT_GENERATOR_TRIPLES.stream().map(List::toArray).
+                toArray(Object[][]::new);
+    }
+
+    @DataProvider
+    public Object[][] intSelectFromTwoVectorOpProvider() {
+        return INT_GENERATOR_SELECT_FROM_TRIPLES.stream().map(List::toArray).
                 toArray(Object[][]::new);
     }
 
@@ -932,8 +1088,6 @@ public class Int128VectorTests extends AbstractVectorTest {
                 })).
                 toArray(Object[][]::new);
     }
-
-
 
     @DataProvider
     public Object[][] maskProvider() {
@@ -979,7 +1133,6 @@ public class Int128VectorTests extends AbstractVectorTest {
                 }))).
                 toArray(Object[][]::new);
     }
-
 
     static final List<IntFunction<int[]>> INT_COMPARE_GENERATORS = List.of(
             withToString("int[i]", (int s) -> {
@@ -1078,10 +1231,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-    static int get(int[] a, int i) {
-        return (int) a[i];
-    }
-
     static final IntFunction<int[]> fr = (vl) -> {
         int length = BUFFER_REPS * vl;
         return new int[length];
@@ -1119,6 +1268,18 @@ public class Int128VectorTests extends AbstractVectorTest {
 
     static int ROR_scalar(int a, int b) {
         return Integer.rotateRight(a, ((int)b));
+    }
+
+    static int TRAILING_ZEROS_COUNT_scalar(int a) {
+        return Integer.numberOfTrailingZeros(a);
+    }
+
+    static int LEADING_ZEROS_COUNT_scalar(int a) {
+        return Integer.numberOfLeadingZeros(a);
+    }
+
+    static int REVERSE_scalar(int a) {
+        return Integer.reverse(a);
     }
 
     static boolean eq(int a, int b) {
@@ -1159,6 +1320,10 @@ public class Int128VectorTests extends AbstractVectorTest {
 
     static boolean uge(int a, int b) {
         return Integer.compareUnsigned(a, b) >= 0;
+    }
+
+    static int firstNonZero(int a, int b) {
+        return Integer.compare(a, (int) 0) != 0 ? a : b;
     }
 
     @Test
@@ -1271,6 +1436,7 @@ public class Int128VectorTests extends AbstractVectorTest {
         } catch (ArithmeticException e) {
         }
     }
+
     static int ADD(int a, int b) {
         return (int)(a + b);
     }
@@ -1291,6 +1457,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, Int128VectorTests::ADD);
     }
+
     static int add(int a, int b) {
         return (int)(a + b);
     }
@@ -1347,6 +1514,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, mask, Int128VectorTests::add);
     }
+
     static int SUB(int a, int b) {
         return (int)(a - b);
     }
@@ -1367,6 +1535,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, Int128VectorTests::SUB);
     }
+
     static int sub(int a, int b) {
         return (int)(a - b);
     }
@@ -1423,6 +1592,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, mask, Int128VectorTests::sub);
     }
+
     static int MUL(int a, int b) {
         return (int)(a * b);
     }
@@ -1443,6 +1613,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, Int128VectorTests::MUL);
     }
+
     static int mul(int a, int b) {
         return (int)(a * b);
     }
@@ -1500,8 +1671,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, b, mask, Int128VectorTests::mul);
     }
 
-
-
     static int DIV(int a, int b) {
         return (int)(a / b);
     }
@@ -1524,6 +1693,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, Int128VectorTests::DIV);
     }
+
     static int div(int a, int b) {
         return (int)(a / b);
     }
@@ -1546,8 +1716,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, Int128VectorTests::div);
     }
-
-
 
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void DIVInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
@@ -1654,6 +1822,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, Int128VectorTests::AND);
     }
+
     static int and(int a, int b) {
         return (int)(a & b);
     }
@@ -1672,8 +1841,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, Int128VectorTests::and);
     }
-
-
 
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void ANDInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
@@ -1694,7 +1861,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, mask, Int128VectorTests::AND);
     }
-
 
     static int AND_NOT(int a, int b) {
         return (int)(a & ~b);
@@ -1717,8 +1883,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, b, Int128VectorTests::AND_NOT);
     }
 
-
-
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void AND_NOTInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                           IntFunction<boolean[]> fm) {
@@ -1738,7 +1902,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, mask, Int128VectorTests::AND_NOT);
     }
-
 
     static int OR(int a, int b) {
         return (int)(a | b);
@@ -1760,6 +1923,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, Int128VectorTests::OR);
     }
+
     static int or(int a, int b) {
         return (int)(a | b);
     }
@@ -1778,8 +1942,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, Int128VectorTests::or);
     }
-
-
 
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void ORInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
@@ -1800,7 +1962,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, mask, Int128VectorTests::OR);
     }
-
 
     static int XOR(int a, int b) {
         return (int)(a ^ b);
@@ -1823,8 +1984,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, b, Int128VectorTests::XOR);
     }
 
-
-
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void XORInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                           IntFunction<boolean[]> fm) {
@@ -1845,6 +2004,87 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, b, mask, Int128VectorTests::XOR);
     }
 
+    static int COMPRESS_BITS(int a, int b) {
+        return (int)(Integer.compress(a, b));
+    }
+
+    @Test(dataProvider = "intBinaryOpProvider")
+    static void COMPRESS_BITSInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.COMPRESS_BITS, bv).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, Int128VectorTests::COMPRESS_BITS);
+    }
+
+    @Test(dataProvider = "intBinaryOpMaskProvider")
+    static void COMPRESS_BITSInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
+                                          IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.COMPRESS_BITS, bv, vmask).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, mask, Int128VectorTests::COMPRESS_BITS);
+    }
+
+    static int EXPAND_BITS(int a, int b) {
+        return (int)(Integer.expand(a, b));
+    }
+
+    @Test(dataProvider = "intBinaryOpProvider")
+    static void EXPAND_BITSInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.EXPAND_BITS, bv).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, Int128VectorTests::EXPAND_BITS);
+    }
+
+    @Test(dataProvider = "intBinaryOpMaskProvider")
+    static void EXPAND_BITSInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
+                                          IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.EXPAND_BITS, bv, vmask).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, mask, Int128VectorTests::EXPAND_BITS);
+    }
 
     @Test(dataProvider = "intBinaryOpProvider")
     static void addInt128VectorTestsBroadcastSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb) {
@@ -1939,9 +2179,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertBroadcastArraysEquals(r, a, b, mask, Int128VectorTests::mul);
     }
 
-
-
-
     @Test(dataProvider = "intBinaryOpProvider")
     static void divInt128VectorTestsBroadcastSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb) {
         int[] a = fa.apply(SPECIES.length());
@@ -1957,8 +2194,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertBroadcastArraysEquals(r, a, b, Int128VectorTests::div);
     }
-
-
 
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void divInt128VectorTestsBroadcastMaskedSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb,
@@ -1978,8 +2213,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertBroadcastArraysEquals(r, a, b, mask, Int128VectorTests::div);
     }
-
-
 
     @Test(dataProvider = "intBinaryOpProvider")
     static void ORInt128VectorTestsBroadcastSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb) {
@@ -2009,8 +2242,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertBroadcastArraysEquals(r, a, b, Int128VectorTests::or);
     }
 
-
-
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void ORInt128VectorTestsBroadcastMaskedSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                           IntFunction<boolean[]> fm) {
@@ -2027,8 +2258,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertBroadcastArraysEquals(r, a, b, mask, Int128VectorTests::OR);
     }
-
-
 
     @Test(dataProvider = "intBinaryOpProvider")
     static void ANDInt128VectorTestsBroadcastSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb) {
@@ -2058,8 +2287,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertBroadcastArraysEquals(r, a, b, Int128VectorTests::and);
     }
 
-
-
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void ANDInt128VectorTestsBroadcastMaskedSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                           IntFunction<boolean[]> fm) {
@@ -2077,8 +2304,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertBroadcastArraysEquals(r, a, b, mask, Int128VectorTests::AND);
     }
 
-
-
     @Test(dataProvider = "intBinaryOpProvider")
     static void ORInt128VectorTestsBroadcastLongSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb) {
         int[] a = fa.apply(SPECIES.length());
@@ -2092,8 +2317,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertBroadcastLongArraysEquals(r, a, b, Int128VectorTests::OR);
     }
-
-
 
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void ORInt128VectorTestsBroadcastMaskedLongSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb,
@@ -2111,7 +2334,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertBroadcastLongArraysEquals(r, a, b, mask, Int128VectorTests::OR);
     }
-
 
     @Test(dataProvider = "intBinaryOpProvider")
     static void ADDInt128VectorTestsBroadcastLongSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb) {
@@ -2165,8 +2387,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, b, Int128VectorTests::LSHL);
     }
 
-
-
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void LSHLInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                           IntFunction<boolean[]> fm) {
@@ -2186,11 +2406,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, mask, Int128VectorTests::LSHL);
     }
-
-
-
-
-
 
     static int ASHR(int a, int b) {
         return (int)((a >> b));
@@ -2213,8 +2428,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, b, Int128VectorTests::ASHR);
     }
 
-
-
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void ASHRInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                           IntFunction<boolean[]> fm) {
@@ -2234,11 +2447,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, mask, Int128VectorTests::ASHR);
     }
-
-
-
-
-
 
     static int LSHR(int a, int b) {
         return (int)((a >>> b));
@@ -2261,8 +2469,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, b, Int128VectorTests::LSHR);
     }
 
-
-
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void LSHRInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                           IntFunction<boolean[]> fm) {
@@ -2282,11 +2488,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, mask, Int128VectorTests::LSHR);
     }
-
-
-
-
-
 
     static int LSHL_unary(int a, int b) {
         return (int)((a << b));
@@ -2308,8 +2509,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertShiftArraysEquals(r, a, b, Int128VectorTests::LSHL_unary);
     }
 
-
-
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void LSHLInt128VectorTestsScalarShiftMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                           IntFunction<boolean[]> fm) {
@@ -2328,11 +2527,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertShiftArraysEquals(r, a, b, mask, Int128VectorTests::LSHL_unary);
     }
-
-
-
-
-
 
     static int LSHR_unary(int a, int b) {
         return (int)((a >>> b));
@@ -2354,8 +2548,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertShiftArraysEquals(r, a, b, Int128VectorTests::LSHR_unary);
     }
 
-
-
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void LSHRInt128VectorTestsScalarShiftMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                           IntFunction<boolean[]> fm) {
@@ -2374,11 +2566,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertShiftArraysEquals(r, a, b, mask, Int128VectorTests::LSHR_unary);
     }
-
-
-
-
-
 
     static int ASHR_unary(int a, int b) {
         return (int)((a >> b));
@@ -2400,8 +2587,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertShiftArraysEquals(r, a, b, Int128VectorTests::ASHR_unary);
     }
 
-
-
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void ASHRInt128VectorTestsScalarShiftMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                           IntFunction<boolean[]> fm) {
@@ -2420,11 +2605,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertShiftArraysEquals(r, a, b, mask, Int128VectorTests::ASHR_unary);
     }
-
-
-
-
-
 
     static int ROR(int a, int b) {
         return (int)(ROR_scalar(a,b));
@@ -2447,8 +2627,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, b, Int128VectorTests::ROR);
     }
 
-
-
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void RORInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                           IntFunction<boolean[]> fm) {
@@ -2468,7 +2646,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, mask, Int128VectorTests::ROR);
     }
-
 
     static int ROL(int a, int b) {
         return (int)(ROL_scalar(a,b));
@@ -2491,8 +2668,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, b, Int128VectorTests::ROL);
     }
 
-
-
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void ROLInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                           IntFunction<boolean[]> fm) {
@@ -2513,9 +2688,8 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, b, mask, Int128VectorTests::ROL);
     }
 
-
     static int ROR_unary(int a, int b) {
-        return (int)(ROR_scalar(a,b));
+        return (int)(ROR_scalar(a, b));
     }
 
     @Test(dataProvider = "intBinaryOpProvider")
@@ -2533,8 +2707,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertShiftArraysEquals(r, a, b, Int128VectorTests::ROR_unary);
     }
-
-
 
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void RORInt128VectorTestsScalarShiftMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
@@ -2555,9 +2727,8 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertShiftArraysEquals(r, a, b, mask, Int128VectorTests::ROR_unary);
     }
 
-
     static int ROL_unary(int a, int b) {
-        return (int)(ROL_scalar(a,b));
+        return (int)(ROL_scalar(a, b));
     }
 
     @Test(dataProvider = "intBinaryOpProvider")
@@ -2575,8 +2746,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertShiftArraysEquals(r, a, b, Int128VectorTests::ROL_unary);
     }
-
-
 
     @Test(dataProvider = "intBinaryOpMaskProvider")
     static void ROLInt128VectorTestsScalarShiftMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
@@ -2596,6 +2765,191 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertShiftArraysEquals(r, a, b, mask, Int128VectorTests::ROL_unary);
     }
+    static int LSHR_binary_const(int a) {
+        return (int)((a >>> CONST_SHIFT));
+    }
+
+    @Test(dataProvider = "intUnaryOpProvider")
+    static void LSHRInt128VectorTestsScalarShiftConst(IntFunction<int[]> fa) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.LSHR, CONST_SHIFT).intoArray(r, i);
+            }
+        }
+
+        assertShiftConstEquals(r, a, Int128VectorTests::LSHR_binary_const);
+    }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void LSHRInt128VectorTestsScalarShiftMaskedConst(IntFunction<int[]> fa,
+                                          IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.LSHR, CONST_SHIFT, vmask).intoArray(r, i);
+            }
+        }
+
+        assertShiftConstEquals(r, a, mask, Int128VectorTests::LSHR_binary_const);
+    }
+
+    static int LSHL_binary_const(int a) {
+        return (int)((a << CONST_SHIFT));
+    }
+
+    @Test(dataProvider = "intUnaryOpProvider")
+    static void LSHLInt128VectorTestsScalarShiftConst(IntFunction<int[]> fa) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.LSHL, CONST_SHIFT).intoArray(r, i);
+            }
+        }
+
+        assertShiftConstEquals(r, a, Int128VectorTests::LSHL_binary_const);
+    }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void LSHLInt128VectorTestsScalarShiftMaskedConst(IntFunction<int[]> fa,
+                                          IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.LSHL, CONST_SHIFT, vmask).intoArray(r, i);
+            }
+        }
+
+        assertShiftConstEquals(r, a, mask, Int128VectorTests::LSHL_binary_const);
+    }
+
+    static int ASHR_binary_const(int a) {
+        return (int)((a >> CONST_SHIFT));
+    }
+
+    @Test(dataProvider = "intUnaryOpProvider")
+    static void ASHRInt128VectorTestsScalarShiftConst(IntFunction<int[]> fa) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.ASHR, CONST_SHIFT).intoArray(r, i);
+            }
+        }
+
+        assertShiftConstEquals(r, a, Int128VectorTests::ASHR_binary_const);
+    }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void ASHRInt128VectorTestsScalarShiftMaskedConst(IntFunction<int[]> fa,
+                                          IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.ASHR, CONST_SHIFT, vmask).intoArray(r, i);
+            }
+        }
+
+        assertShiftConstEquals(r, a, mask, Int128VectorTests::ASHR_binary_const);
+    }
+
+    static int ROR_binary_const(int a) {
+        return (int)(ROR_scalar(a, CONST_SHIFT));
+    }
+
+    @Test(dataProvider = "intUnaryOpProvider")
+    static void RORInt128VectorTestsScalarShiftConst(IntFunction<int[]> fa) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.ROR, CONST_SHIFT).intoArray(r, i);
+            }
+        }
+
+        assertShiftConstEquals(r, a, Int128VectorTests::ROR_binary_const);
+    }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void RORInt128VectorTestsScalarShiftMaskedConst(IntFunction<int[]> fa,
+                                          IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.ROR, CONST_SHIFT, vmask).intoArray(r, i);
+            }
+        }
+
+        assertShiftConstEquals(r, a, mask, Int128VectorTests::ROR_binary_const);
+    }
+
+    static int ROL_binary_const(int a) {
+        return (int)(ROL_scalar(a, CONST_SHIFT));
+    }
+
+    @Test(dataProvider = "intUnaryOpProvider")
+    static void ROLInt128VectorTestsScalarShiftConst(IntFunction<int[]> fa) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.ROL, CONST_SHIFT).intoArray(r, i);
+            }
+        }
+
+        assertShiftConstEquals(r, a, Int128VectorTests::ROL_binary_const);
+    }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void ROLInt128VectorTestsScalarShiftMaskedConst(IntFunction<int[]> fa,
+                                          IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.ROL, CONST_SHIFT, vmask).intoArray(r, i);
+            }
+        }
+
+        assertShiftConstEquals(r, a, mask, Int128VectorTests::ROL_binary_const);
+    }
+
 
     static int MIN(int a, int b) {
         return (int)(Math.min(a, b));
@@ -2617,6 +2971,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, Int128VectorTests::MIN);
     }
+
     static int min(int a, int b) {
         return (int)(Math.min(a, b));
     }
@@ -2635,6 +2990,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, Int128VectorTests::min);
     }
+
     static int MAX(int a, int b) {
         return (int)(Math.max(a, b));
     }
@@ -2655,6 +3011,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, Int128VectorTests::MAX);
     }
+
     static int max(int a, int b) {
         return (int)(Math.max(a, b));
     }
@@ -2672,6 +3029,252 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
 
         assertArraysEquals(r, a, b, Int128VectorTests::max);
+    }
+
+    static int UMIN(int a, int b) {
+        return (int)(VectorMath.minUnsigned(a, b));
+    }
+
+    @Test(dataProvider = "intBinaryOpProvider")
+    static void UMINInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.UMIN, bv).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, Int128VectorTests::UMIN);
+    }
+
+    @Test(dataProvider = "intBinaryOpMaskProvider")
+    static void UMINInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
+                                          IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.UMIN, bv, vmask).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, mask, Int128VectorTests::UMIN);
+    }
+
+    static int UMAX(int a, int b) {
+        return (int)(VectorMath.maxUnsigned(a, b));
+    }
+
+    @Test(dataProvider = "intBinaryOpProvider")
+    static void UMAXInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.UMAX, bv).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, Int128VectorTests::UMAX);
+    }
+
+    @Test(dataProvider = "intBinaryOpMaskProvider")
+    static void UMAXInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
+                                          IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.UMAX, bv, vmask).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, mask, Int128VectorTests::UMAX);
+    }
+
+    static int SADD(int a, int b) {
+        return (int)(VectorMath.addSaturating(a, b));
+    }
+
+    @Test(dataProvider = "intSaturatingBinaryOpProvider")
+    static void SADDInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.SADD, bv).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, Int128VectorTests::SADD);
+    }
+
+    @Test(dataProvider = "intSaturatingBinaryOpMaskProvider")
+    static void SADDInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
+                                          IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.SADD, bv, vmask).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, mask, Int128VectorTests::SADD);
+    }
+
+    static int SSUB(int a, int b) {
+        return (int)(VectorMath.subSaturating(a, b));
+    }
+
+    @Test(dataProvider = "intSaturatingBinaryOpProvider")
+    static void SSUBInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.SSUB, bv).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, Int128VectorTests::SSUB);
+    }
+
+    @Test(dataProvider = "intSaturatingBinaryOpMaskProvider")
+    static void SSUBInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
+                                          IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.SSUB, bv, vmask).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, mask, Int128VectorTests::SSUB);
+    }
+
+    static int SUADD(int a, int b) {
+        return (int)(VectorMath.addSaturatingUnsigned(a, b));
+    }
+
+    @Test(dataProvider = "intSaturatingBinaryOpProvider")
+    static void SUADDInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.SUADD, bv).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, Int128VectorTests::SUADD);
+    }
+
+    @Test(dataProvider = "intSaturatingBinaryOpMaskProvider")
+    static void SUADDInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
+                                          IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.SUADD, bv, vmask).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, mask, Int128VectorTests::SUADD);
+    }
+
+    static int SUSUB(int a, int b) {
+        return (int)(VectorMath.subSaturatingUnsigned(a, b));
+    }
+
+    @Test(dataProvider = "intSaturatingBinaryOpProvider")
+    static void SUSUBInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.SUSUB, bv).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, Int128VectorTests::SUSUB);
+    }
+
+    @Test(dataProvider = "intSaturatingBinaryOpMaskProvider")
+    static void SUSUBInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
+                                          IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                av.lanewise(VectorOperators.SUSUB, bv, vmask).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, b, mask, Int128VectorTests::SUSUB);
     }
 
     @Test(dataProvider = "intBinaryOpProvider")
@@ -2748,7 +3351,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         return res;
     }
 
-
     @Test(dataProvider = "intUnaryOpProvider")
     static void ANDReduceInt128VectorTests(IntFunction<int[]> fa) {
         int[] a = fa.apply(SPECIES.length());
@@ -2774,7 +3376,6 @@ public class Int128VectorTests extends AbstractVectorTest {
                 Int128VectorTests::ANDReduce, Int128VectorTests::ANDReduceAll);
     }
 
-
     static int ANDReduceMasked(int[] a, int idx, boolean[] mask) {
         int res = -1;
         for (int i = idx; i < (idx + SPECIES.length()); i++) {
@@ -2793,7 +3394,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         return res;
     }
-
 
     @Test(dataProvider = "intUnaryOpMaskProvider")
     static void ANDReduceInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<boolean[]> fm) {
@@ -2822,7 +3422,6 @@ public class Int128VectorTests extends AbstractVectorTest {
                 Int128VectorTests::ANDReduceMasked, Int128VectorTests::ANDReduceAllMasked);
     }
 
-
     static int ORReduce(int[] a, int idx) {
         int res = 0;
         for (int i = idx; i < (idx + SPECIES.length()); i++) {
@@ -2840,7 +3439,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         return res;
     }
-
 
     @Test(dataProvider = "intUnaryOpProvider")
     static void ORReduceInt128VectorTests(IntFunction<int[]> fa) {
@@ -2867,7 +3465,6 @@ public class Int128VectorTests extends AbstractVectorTest {
                 Int128VectorTests::ORReduce, Int128VectorTests::ORReduceAll);
     }
 
-
     static int ORReduceMasked(int[] a, int idx, boolean[] mask) {
         int res = 0;
         for (int i = idx; i < (idx + SPECIES.length()); i++) {
@@ -2886,7 +3483,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         return res;
     }
-
 
     @Test(dataProvider = "intUnaryOpMaskProvider")
     static void ORReduceInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<boolean[]> fm) {
@@ -2915,7 +3511,6 @@ public class Int128VectorTests extends AbstractVectorTest {
                 Int128VectorTests::ORReduceMasked, Int128VectorTests::ORReduceAllMasked);
     }
 
-
     static int XORReduce(int[] a, int idx) {
         int res = 0;
         for (int i = idx; i < (idx + SPECIES.length()); i++) {
@@ -2933,7 +3528,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         return res;
     }
-
 
     @Test(dataProvider = "intUnaryOpProvider")
     static void XORReduceInt128VectorTests(IntFunction<int[]> fa) {
@@ -2960,7 +3554,6 @@ public class Int128VectorTests extends AbstractVectorTest {
                 Int128VectorTests::XORReduce, Int128VectorTests::XORReduceAll);
     }
 
-
     static int XORReduceMasked(int[] a, int idx, boolean[] mask) {
         int res = 0;
         for (int i = idx; i < (idx + SPECIES.length()); i++) {
@@ -2979,7 +3572,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         return res;
     }
-
 
     @Test(dataProvider = "intUnaryOpMaskProvider")
     static void XORReduceInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<boolean[]> fm) {
@@ -3025,6 +3617,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         return res;
     }
+
     @Test(dataProvider = "intUnaryOpProvider")
     static void ADDReduceInt128VectorTests(IntFunction<int[]> fa) {
         int[] a = fa.apply(SPECIES.length());
@@ -3049,6 +3642,7 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertReductionArraysEquals(r, ra, a,
                 Int128VectorTests::ADDReduce, Int128VectorTests::ADDReduceAll);
     }
+
     static int ADDReduceMasked(int[] a, int idx, boolean[] mask) {
         int res = 0;
         for (int i = idx; i < (idx + SPECIES.length()); i++) {
@@ -3067,6 +3661,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         return res;
     }
+
     @Test(dataProvider = "intUnaryOpMaskProvider")
     static void ADDReduceInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<boolean[]> fm) {
         int[] a = fa.apply(SPECIES.length());
@@ -3093,6 +3688,7 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertReductionArraysEqualsMasked(r, ra, a, mask,
                 Int128VectorTests::ADDReduceMasked, Int128VectorTests::ADDReduceAllMasked);
     }
+
     static int MULReduce(int[] a, int idx) {
         int res = 1;
         for (int i = idx; i < (idx + SPECIES.length()); i++) {
@@ -3110,6 +3706,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         return res;
     }
+
     @Test(dataProvider = "intUnaryOpProvider")
     static void MULReduceInt128VectorTests(IntFunction<int[]> fa) {
         int[] a = fa.apply(SPECIES.length());
@@ -3134,6 +3731,7 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertReductionArraysEquals(r, ra, a,
                 Int128VectorTests::MULReduce, Int128VectorTests::MULReduceAll);
     }
+
     static int MULReduceMasked(int[] a, int idx, boolean[] mask) {
         int res = 1;
         for (int i = idx; i < (idx + SPECIES.length()); i++) {
@@ -3152,6 +3750,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         return res;
     }
+
     @Test(dataProvider = "intUnaryOpMaskProvider")
     static void MULReduceInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<boolean[]> fm) {
         int[] a = fa.apply(SPECIES.length());
@@ -3178,10 +3777,11 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertReductionArraysEqualsMasked(r, ra, a, mask,
                 Int128VectorTests::MULReduceMasked, Int128VectorTests::MULReduceAllMasked);
     }
+
     static int MINReduce(int[] a, int idx) {
         int res = Integer.MAX_VALUE;
         for (int i = idx; i < (idx + SPECIES.length()); i++) {
-            res = (int)Math.min(res, a[i]);
+            res = (int) Math.min(res, a[i]);
         }
 
         return res;
@@ -3189,12 +3789,13 @@ public class Int128VectorTests extends AbstractVectorTest {
 
     static int MINReduceAll(int[] a) {
         int res = Integer.MAX_VALUE;
-        for (int i = 0; i < a.length; i++) {
-            res = (int)Math.min(res, a[i]);
+        for (int i = 0; i < a.length; i += SPECIES.length()) {
+            res = (int) Math.min(res, MINReduce(a, i));
         }
 
         return res;
     }
+
     @Test(dataProvider = "intUnaryOpProvider")
     static void MINReduceInt128VectorTests(IntFunction<int[]> fa) {
         int[] a = fa.apply(SPECIES.length());
@@ -3212,18 +3813,19 @@ public class Int128VectorTests extends AbstractVectorTest {
             ra = Integer.MAX_VALUE;
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
-                ra = (int)Math.min(ra, av.reduceLanes(VectorOperators.MIN));
+                ra = (int) Math.min(ra, av.reduceLanes(VectorOperators.MIN));
             }
         }
 
         assertReductionArraysEquals(r, ra, a,
                 Int128VectorTests::MINReduce, Int128VectorTests::MINReduceAll);
     }
+
     static int MINReduceMasked(int[] a, int idx, boolean[] mask) {
         int res = Integer.MAX_VALUE;
         for (int i = idx; i < (idx + SPECIES.length()); i++) {
-            if(mask[i % SPECIES.length()])
-                res = (int)Math.min(res, a[i]);
+            if (mask[i % SPECIES.length()])
+                res = (int) Math.min(res, a[i]);
         }
 
         return res;
@@ -3231,13 +3833,13 @@ public class Int128VectorTests extends AbstractVectorTest {
 
     static int MINReduceAllMasked(int[] a, boolean[] mask) {
         int res = Integer.MAX_VALUE;
-        for (int i = 0; i < a.length; i++) {
-            if(mask[i % SPECIES.length()])
-                res = (int)Math.min(res, a[i]);
+        for (int i = 0; i < a.length; i += SPECIES.length()) {
+            res = (int) Math.min(res, MINReduceMasked(a, i, mask));
         }
 
         return res;
     }
+
     @Test(dataProvider = "intUnaryOpMaskProvider")
     static void MINReduceInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<boolean[]> fm) {
         int[] a = fa.apply(SPECIES.length());
@@ -3257,17 +3859,18 @@ public class Int128VectorTests extends AbstractVectorTest {
             ra = Integer.MAX_VALUE;
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
-                ra = (int)Math.min(ra, av.reduceLanes(VectorOperators.MIN, vmask));
+                ra = (int) Math.min(ra, av.reduceLanes(VectorOperators.MIN, vmask));
             }
         }
 
         assertReductionArraysEqualsMasked(r, ra, a, mask,
                 Int128VectorTests::MINReduceMasked, Int128VectorTests::MINReduceAllMasked);
     }
+
     static int MAXReduce(int[] a, int idx) {
         int res = Integer.MIN_VALUE;
         for (int i = idx; i < (idx + SPECIES.length()); i++) {
-            res = (int)Math.max(res, a[i]);
+            res = (int) Math.max(res, a[i]);
         }
 
         return res;
@@ -3275,12 +3878,13 @@ public class Int128VectorTests extends AbstractVectorTest {
 
     static int MAXReduceAll(int[] a) {
         int res = Integer.MIN_VALUE;
-        for (int i = 0; i < a.length; i++) {
-            res = (int)Math.max(res, a[i]);
+        for (int i = 0; i < a.length; i += SPECIES.length()) {
+            res = (int) Math.max(res, MAXReduce(a, i));
         }
 
         return res;
     }
+
     @Test(dataProvider = "intUnaryOpProvider")
     static void MAXReduceInt128VectorTests(IntFunction<int[]> fa) {
         int[] a = fa.apply(SPECIES.length());
@@ -3298,18 +3902,19 @@ public class Int128VectorTests extends AbstractVectorTest {
             ra = Integer.MIN_VALUE;
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
-                ra = (int)Math.max(ra, av.reduceLanes(VectorOperators.MAX));
+                ra = (int) Math.max(ra, av.reduceLanes(VectorOperators.MAX));
             }
         }
 
         assertReductionArraysEquals(r, ra, a,
                 Int128VectorTests::MAXReduce, Int128VectorTests::MAXReduceAll);
     }
+
     static int MAXReduceMasked(int[] a, int idx, boolean[] mask) {
         int res = Integer.MIN_VALUE;
         for (int i = idx; i < (idx + SPECIES.length()); i++) {
-            if(mask[i % SPECIES.length()])
-                res = (int)Math.max(res, a[i]);
+            if (mask[i % SPECIES.length()])
+                res = (int) Math.max(res, a[i]);
         }
 
         return res;
@@ -3317,13 +3922,13 @@ public class Int128VectorTests extends AbstractVectorTest {
 
     static int MAXReduceAllMasked(int[] a, boolean[] mask) {
         int res = Integer.MIN_VALUE;
-        for (int i = 0; i < a.length; i++) {
-            if(mask[i % SPECIES.length()])
-                res = (int)Math.max(res, a[i]);
+        for (int i = 0; i < a.length; i += SPECIES.length()) {
+            res = (int) Math.max(res, MAXReduceMasked(a, i, mask));
         }
 
         return res;
     }
+
     @Test(dataProvider = "intUnaryOpMaskProvider")
     static void MAXReduceInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<boolean[]> fm) {
         int[] a = fa.apply(SPECIES.length());
@@ -3343,12 +3948,279 @@ public class Int128VectorTests extends AbstractVectorTest {
             ra = Integer.MIN_VALUE;
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
-                ra = (int)Math.max(ra, av.reduceLanes(VectorOperators.MAX, vmask));
+                ra = (int) Math.max(ra, av.reduceLanes(VectorOperators.MAX, vmask));
             }
         }
 
         assertReductionArraysEqualsMasked(r, ra, a, mask,
                 Int128VectorTests::MAXReduceMasked, Int128VectorTests::MAXReduceAllMasked);
+    }
+
+    static int UMINReduce(int[] a, int idx) {
+        int res = Integer.MAX_VALUE;
+        for (int i = idx; i < (idx + SPECIES.length()); i++) {
+            res = (int) VectorMath.minUnsigned(res, a[i]);
+        }
+
+        return res;
+    }
+
+    static int UMINReduceAll(int[] a) {
+        int res = Integer.MAX_VALUE;
+        for (int i = 0; i < a.length; i += SPECIES.length()) {
+            res = (int) VectorMath.minUnsigned(res, UMINReduce(a, i));
+        }
+
+        return res;
+    }
+
+    @Test(dataProvider = "intUnaryOpProvider")
+    static void UMINReduceInt128VectorTests(IntFunction<int[]> fa) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        int ra = Integer.MAX_VALUE;
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                r[i] = av.reduceLanes(VectorOperators.UMIN);
+            }
+        }
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            ra = Integer.MAX_VALUE;
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                ra = (int) VectorMath.minUnsigned(ra, av.reduceLanes(VectorOperators.UMIN));
+            }
+        }
+
+        assertReductionArraysEquals(r, ra, a,
+                Int128VectorTests::UMINReduce, Int128VectorTests::UMINReduceAll);
+    }
+
+    static int UMINReduceMasked(int[] a, int idx, boolean[] mask) {
+        int res = Integer.MAX_VALUE;
+        for (int i = idx; i < (idx + SPECIES.length()); i++) {
+            if (mask[i % SPECIES.length()])
+                res = (int) VectorMath.minUnsigned(res, a[i]);
+        }
+
+        return res;
+    }
+
+    static int UMINReduceAllMasked(int[] a, boolean[] mask) {
+        int res = Integer.MAX_VALUE;
+        for (int i = 0; i < a.length; i += SPECIES.length()) {
+            res = (int) VectorMath.minUnsigned(res, UMINReduceMasked(a, i, mask));
+        }
+
+        return res;
+    }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void UMINReduceInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+        int ra = Integer.MAX_VALUE;
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                r[i] = av.reduceLanes(VectorOperators.UMIN, vmask);
+            }
+        }
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            ra = Integer.MAX_VALUE;
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                ra = (int) VectorMath.minUnsigned(ra, av.reduceLanes(VectorOperators.UMIN, vmask));
+            }
+        }
+
+        assertReductionArraysEqualsMasked(r, ra, a, mask,
+                Int128VectorTests::UMINReduceMasked, Int128VectorTests::UMINReduceAllMasked);
+    }
+
+    static int UMAXReduce(int[] a, int idx) {
+        int res = Integer.MIN_VALUE;
+        for (int i = idx; i < (idx + SPECIES.length()); i++) {
+            res = (int) VectorMath.maxUnsigned(res, a[i]);
+        }
+
+        return res;
+    }
+
+    static int UMAXReduceAll(int[] a) {
+        int res = Integer.MIN_VALUE;
+        for (int i = 0; i < a.length; i += SPECIES.length()) {
+            res = (int) VectorMath.maxUnsigned(res, UMAXReduce(a, i));
+        }
+
+        return res;
+    }
+
+    @Test(dataProvider = "intUnaryOpProvider")
+    static void UMAXReduceInt128VectorTests(IntFunction<int[]> fa) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        int ra = Integer.MIN_VALUE;
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                r[i] = av.reduceLanes(VectorOperators.UMAX);
+            }
+        }
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            ra = Integer.MIN_VALUE;
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                ra = (int) VectorMath.maxUnsigned(ra, av.reduceLanes(VectorOperators.UMAX));
+            }
+        }
+
+        assertReductionArraysEquals(r, ra, a,
+                Int128VectorTests::UMAXReduce, Int128VectorTests::UMAXReduceAll);
+    }
+
+    static int UMAXReduceMasked(int[] a, int idx, boolean[] mask) {
+        int res = Integer.MIN_VALUE;
+        for (int i = idx; i < (idx + SPECIES.length()); i++) {
+            if (mask[i % SPECIES.length()])
+                res = (int) VectorMath.maxUnsigned(res, a[i]);
+        }
+
+        return res;
+    }
+
+    static int UMAXReduceAllMasked(int[] a, boolean[] mask) {
+        int res = Integer.MIN_VALUE;
+        for (int i = 0; i < a.length; i += SPECIES.length()) {
+            res = (int) VectorMath.maxUnsigned(res, UMAXReduceMasked(a, i, mask));
+        }
+
+        return res;
+    }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void UMAXReduceInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+        int ra = Integer.MIN_VALUE;
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                r[i] = av.reduceLanes(VectorOperators.UMAX, vmask);
+            }
+        }
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            ra = Integer.MIN_VALUE;
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                ra = (int) VectorMath.maxUnsigned(ra, av.reduceLanes(VectorOperators.UMAX, vmask));
+            }
+        }
+
+        assertReductionArraysEqualsMasked(r, ra, a, mask,
+                Int128VectorTests::UMAXReduceMasked, Int128VectorTests::UMAXReduceAllMasked);
+    }
+
+    static int FIRST_NONZEROReduce(int[] a, int idx) {
+        int res = (int) 0;
+        for (int i = idx; i < (idx + SPECIES.length()); i++) {
+            res = firstNonZero(res, a[i]);
+        }
+
+        return res;
+    }
+
+    static int FIRST_NONZEROReduceAll(int[] a) {
+        int res = (int) 0;
+        for (int i = 0; i < a.length; i += SPECIES.length()) {
+            res = firstNonZero(res, FIRST_NONZEROReduce(a, i));
+        }
+
+        return res;
+    }
+
+    @Test(dataProvider = "intUnaryOpProvider")
+    static void FIRST_NONZEROReduceInt128VectorTests(IntFunction<int[]> fa) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        int ra = (int) 0;
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                r[i] = av.reduceLanes(VectorOperators.FIRST_NONZERO);
+            }
+        }
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            ra = (int) 0;
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                ra = firstNonZero(ra, av.reduceLanes(VectorOperators.FIRST_NONZERO));
+            }
+        }
+
+        assertReductionArraysEquals(r, ra, a,
+                Int128VectorTests::FIRST_NONZEROReduce, Int128VectorTests::FIRST_NONZEROReduceAll);
+    }
+
+    static int FIRST_NONZEROReduceMasked(int[] a, int idx, boolean[] mask) {
+        int res = (int) 0;
+        for (int i = idx; i < (idx + SPECIES.length()); i++) {
+            if (mask[i % SPECIES.length()])
+                res = firstNonZero(res, a[i]);
+        }
+
+        return res;
+    }
+
+    static int FIRST_NONZEROReduceAllMasked(int[] a, boolean[] mask) {
+        int res = (int) 0;
+        for (int i = 0; i < a.length; i += SPECIES.length()) {
+            res = firstNonZero(res, FIRST_NONZEROReduceMasked(a, i, mask));
+        }
+
+        return res;
+    }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void FIRST_NONZEROReduceInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+        int ra = (int) 0;
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                r[i] = av.reduceLanes(VectorOperators.FIRST_NONZERO, vmask);
+            }
+        }
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            ra = (int) 0;
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                ra = firstNonZero(ra, av.reduceLanes(VectorOperators.FIRST_NONZERO, vmask));
+            }
+        }
+
+        assertReductionArraysEqualsMasked(r, ra, a, mask,
+                Int128VectorTests::FIRST_NONZEROReduceMasked, Int128VectorTests::FIRST_NONZEROReduceAllMasked);
     }
 
     static boolean anyTrue(boolean[] a, int idx) {
@@ -3359,7 +4231,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         return res;
     }
-
 
     @Test(dataProvider = "boolUnaryOpProvider")
     static void anyTrueInt128VectorTests(IntFunction<boolean[]> fm) {
@@ -3376,7 +4247,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertReductionBoolArraysEquals(r, mask, Int128VectorTests::anyTrue);
     }
 
-
     static boolean allTrue(boolean[] a, int idx) {
         boolean res = true;
         for (int i = idx; i < (idx + SPECIES.length()); i++) {
@@ -3385,7 +4255,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         return res;
     }
-
 
     @Test(dataProvider = "boolUnaryOpProvider")
     static void allTrueInt128VectorTests(IntFunction<boolean[]> fm) {
@@ -3402,24 +4271,25 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertReductionBoolArraysEquals(r, mask, Int128VectorTests::allTrue);
     }
 
-
-    @Test(dataProvider = "intUnaryOpProvider")
-    static void withInt128VectorTests(IntFunction<int []> fa) {
+    @Test(dataProvider = "intBinaryOpProvider")
+    static void withInt128VectorTests(IntFunction<int []> fa, IntFunction<int []> fb) {
         int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
         int[] r = fr.apply(SPECIES.length());
 
         for (int ic = 0; ic < INVOC_COUNT; ic++) {
             for (int i = 0, j = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
-                av.withLane((j++ & (SPECIES.length()-1)), (int)(65535+i)).intoArray(r, i);
+                av.withLane(j, b[i + j]).intoArray(r, i);
+                a[i + j] = b[i + j];
+                j = (j + 1) & (SPECIES.length() - 1);
             }
         }
 
 
-        for (int i = 0, j = 0; i < a.length; i += SPECIES.length()) {
-            assertInsertArraysEquals(r, a, (int)(65535+i), (j++ & (SPECIES.length()-1)), i , i + SPECIES.length());
-        }
+        assertArraysStrictlyEquals(r, a);
     }
+
     static boolean testIS_DEFAULT(int a) {
         return bits(a)==0;
     }
@@ -3442,22 +4312,25 @@ public class Int128VectorTests extends AbstractVectorTest {
     }
 
     @Test(dataProvider = "intTestOpMaskProvider")
-    static void IS_DEFAULTMaskedInt128VectorTestsSmokeTest(IntFunction<int[]> fa,
+    static void IS_DEFAULTMaskedInt128VectorTests(IntFunction<int[]> fa,
                                           IntFunction<boolean[]> fm) {
         int[] a = fa.apply(SPECIES.length());
         boolean[] mask = fm.apply(SPECIES.length());
         VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
 
-        for (int i = 0; i < a.length; i += SPECIES.length()) {
-            IntVector av = IntVector.fromArray(SPECIES, a, i);
-            VectorMask<Integer> mv = av.test(VectorOperators.IS_DEFAULT, vmask);
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                VectorMask<Integer> mv = av.test(VectorOperators.IS_DEFAULT, vmask);
 
-            // Check results as part of computation.
-            for (int j = 0; j < SPECIES.length(); j++) {
-                Assert.assertEquals(mv.laneIsSet(j),  vmask.laneIsSet(j) && testIS_DEFAULT(a[i + j]));
+                // Check results as part of computation.
+                for (int j = 0; j < SPECIES.length(); j++) {
+                    Assert.assertEquals(mv.laneIsSet(j),  vmask.laneIsSet(j) && testIS_DEFAULT(a[i + j]));
+                }
             }
         }
     }
+
     static boolean testIS_NEGATIVE(int a) {
         return bits(a)<0;
     }
@@ -3480,25 +4353,24 @@ public class Int128VectorTests extends AbstractVectorTest {
     }
 
     @Test(dataProvider = "intTestOpMaskProvider")
-    static void IS_NEGATIVEMaskedInt128VectorTestsSmokeTest(IntFunction<int[]> fa,
+    static void IS_NEGATIVEMaskedInt128VectorTests(IntFunction<int[]> fa,
                                           IntFunction<boolean[]> fm) {
         int[] a = fa.apply(SPECIES.length());
         boolean[] mask = fm.apply(SPECIES.length());
         VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
 
-        for (int i = 0; i < a.length; i += SPECIES.length()) {
-            IntVector av = IntVector.fromArray(SPECIES, a, i);
-            VectorMask<Integer> mv = av.test(VectorOperators.IS_NEGATIVE, vmask);
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                VectorMask<Integer> mv = av.test(VectorOperators.IS_NEGATIVE, vmask);
 
-            // Check results as part of computation.
-            for (int j = 0; j < SPECIES.length(); j++) {
-                Assert.assertEquals(mv.laneIsSet(j),  vmask.laneIsSet(j) && testIS_NEGATIVE(a[i + j]));
+                // Check results as part of computation.
+                for (int j = 0; j < SPECIES.length(); j++) {
+                    Assert.assertEquals(mv.laneIsSet(j),  vmask.laneIsSet(j) && testIS_NEGATIVE(a[i + j]));
+                }
             }
         }
     }
-
-
-
 
     @Test(dataProvider = "intCompareOpProvider")
     static void LTInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
@@ -3518,7 +4390,6 @@ public class Int128VectorTests extends AbstractVectorTest {
             }
         }
     }
-
 
     @Test(dataProvider = "intCompareOpProvider")
     static void ltInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
@@ -3562,7 +4433,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
     @Test(dataProvider = "intCompareOpProvider")
     static void GTInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
         int[] a = fa.apply(SPECIES.length());
@@ -3605,7 +4475,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
     @Test(dataProvider = "intCompareOpProvider")
     static void EQInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
         int[] a = fa.apply(SPECIES.length());
@@ -3624,7 +4493,6 @@ public class Int128VectorTests extends AbstractVectorTest {
             }
         }
     }
-
 
     @Test(dataProvider = "intCompareOpProvider")
     static void eqInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
@@ -3668,7 +4536,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
     @Test(dataProvider = "intCompareOpProvider")
     static void NEInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
         int[] a = fa.apply(SPECIES.length());
@@ -3710,7 +4577,6 @@ public class Int128VectorTests extends AbstractVectorTest {
             }
         }
     }
-
 
     @Test(dataProvider = "intCompareOpProvider")
     static void LEInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
@@ -3754,7 +4620,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
     @Test(dataProvider = "intCompareOpProvider")
     static void GEInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
         int[] a = fa.apply(SPECIES.length());
@@ -3797,10 +4662,8 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
-
     @Test(dataProvider = "intCompareOpProvider")
-    static void UNSIGNED_LTInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
+    static void ULTInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
         int[] a = fa.apply(SPECIES.length());
         int[] b = fb.apply(SPECIES.length());
 
@@ -3808,7 +4671,7 @@ public class Int128VectorTests extends AbstractVectorTest {
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
                 IntVector bv = IntVector.fromArray(SPECIES, b, i);
-                VectorMask<Integer> mv = av.compare(VectorOperators.UNSIGNED_LT, bv);
+                VectorMask<Integer> mv = av.compare(VectorOperators.ULT, bv);
 
                 // Check results as part of computation.
                 for (int j = 0; j < SPECIES.length(); j++) {
@@ -3818,10 +4681,8 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
-
     @Test(dataProvider = "intCompareOpMaskProvider")
-    static void UNSIGNED_LTInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
+    static void ULTInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                                 IntFunction<boolean[]> fm) {
         int[] a = fa.apply(SPECIES.length());
         int[] b = fb.apply(SPECIES.length());
@@ -3833,7 +4694,7 @@ public class Int128VectorTests extends AbstractVectorTest {
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
                 IntVector bv = IntVector.fromArray(SPECIES, b, i);
-                VectorMask<Integer> mv = av.compare(VectorOperators.UNSIGNED_LT, bv, vmask);
+                VectorMask<Integer> mv = av.compare(VectorOperators.ULT, bv, vmask);
 
                 // Check results as part of computation.
                 for (int j = 0; j < SPECIES.length(); j++) {
@@ -3843,11 +4704,8 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
-
-
     @Test(dataProvider = "intCompareOpProvider")
-    static void UNSIGNED_GTInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
+    static void UGTInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
         int[] a = fa.apply(SPECIES.length());
         int[] b = fb.apply(SPECIES.length());
 
@@ -3855,7 +4713,7 @@ public class Int128VectorTests extends AbstractVectorTest {
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
                 IntVector bv = IntVector.fromArray(SPECIES, b, i);
-                VectorMask<Integer> mv = av.compare(VectorOperators.UNSIGNED_GT, bv);
+                VectorMask<Integer> mv = av.compare(VectorOperators.UGT, bv);
 
                 // Check results as part of computation.
                 for (int j = 0; j < SPECIES.length(); j++) {
@@ -3865,10 +4723,8 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
-
     @Test(dataProvider = "intCompareOpMaskProvider")
-    static void UNSIGNED_GTInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
+    static void UGTInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                                 IntFunction<boolean[]> fm) {
         int[] a = fa.apply(SPECIES.length());
         int[] b = fb.apply(SPECIES.length());
@@ -3880,7 +4736,7 @@ public class Int128VectorTests extends AbstractVectorTest {
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
                 IntVector bv = IntVector.fromArray(SPECIES, b, i);
-                VectorMask<Integer> mv = av.compare(VectorOperators.UNSIGNED_GT, bv, vmask);
+                VectorMask<Integer> mv = av.compare(VectorOperators.UGT, bv, vmask);
 
                 // Check results as part of computation.
                 for (int j = 0; j < SPECIES.length(); j++) {
@@ -3890,11 +4746,8 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
-
-
     @Test(dataProvider = "intCompareOpProvider")
-    static void UNSIGNED_LEInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
+    static void ULEInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
         int[] a = fa.apply(SPECIES.length());
         int[] b = fb.apply(SPECIES.length());
 
@@ -3902,7 +4755,7 @@ public class Int128VectorTests extends AbstractVectorTest {
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
                 IntVector bv = IntVector.fromArray(SPECIES, b, i);
-                VectorMask<Integer> mv = av.compare(VectorOperators.UNSIGNED_LE, bv);
+                VectorMask<Integer> mv = av.compare(VectorOperators.ULE, bv);
 
                 // Check results as part of computation.
                 for (int j = 0; j < SPECIES.length(); j++) {
@@ -3912,10 +4765,8 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
-
     @Test(dataProvider = "intCompareOpMaskProvider")
-    static void UNSIGNED_LEInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
+    static void ULEInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                                 IntFunction<boolean[]> fm) {
         int[] a = fa.apply(SPECIES.length());
         int[] b = fb.apply(SPECIES.length());
@@ -3927,7 +4778,7 @@ public class Int128VectorTests extends AbstractVectorTest {
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
                 IntVector bv = IntVector.fromArray(SPECIES, b, i);
-                VectorMask<Integer> mv = av.compare(VectorOperators.UNSIGNED_LE, bv, vmask);
+                VectorMask<Integer> mv = av.compare(VectorOperators.ULE, bv, vmask);
 
                 // Check results as part of computation.
                 for (int j = 0; j < SPECIES.length(); j++) {
@@ -3937,11 +4788,8 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
-
-
     @Test(dataProvider = "intCompareOpProvider")
-    static void UNSIGNED_GEInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
+    static void UGEInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb) {
         int[] a = fa.apply(SPECIES.length());
         int[] b = fb.apply(SPECIES.length());
 
@@ -3949,7 +4797,7 @@ public class Int128VectorTests extends AbstractVectorTest {
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
                 IntVector bv = IntVector.fromArray(SPECIES, b, i);
-                VectorMask<Integer> mv = av.compare(VectorOperators.UNSIGNED_GE, bv);
+                VectorMask<Integer> mv = av.compare(VectorOperators.UGE, bv);
 
                 // Check results as part of computation.
                 for (int j = 0; j < SPECIES.length(); j++) {
@@ -3959,10 +4807,8 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
-
     @Test(dataProvider = "intCompareOpMaskProvider")
-    static void UNSIGNED_GEInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
+    static void UGEInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
                                                 IntFunction<boolean[]> fm) {
         int[] a = fa.apply(SPECIES.length());
         int[] b = fb.apply(SPECIES.length());
@@ -3974,7 +4820,7 @@ public class Int128VectorTests extends AbstractVectorTest {
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
                 IntVector bv = IntVector.fromArray(SPECIES, b, i);
-                VectorMask<Integer> mv = av.compare(VectorOperators.UNSIGNED_GE, bv, vmask);
+                VectorMask<Integer> mv = av.compare(VectorOperators.UGE, bv, vmask);
 
                 // Check results as part of computation.
                 for (int j = 0; j < SPECIES.length(); j++) {
@@ -3983,8 +4829,6 @@ public class Int128VectorTests extends AbstractVectorTest {
             }
         }
     }
-
-
 
     @Test(dataProvider = "intCompareOpProvider")
     static void LTInt128VectorTestsBroadcastSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb) {
@@ -4001,7 +4845,6 @@ public class Int128VectorTests extends AbstractVectorTest {
             }
         }
     }
-
 
     @Test(dataProvider = "intCompareOpMaskProvider")
     static void LTInt128VectorTestsBroadcastMaskedSmokeTest(IntFunction<int[]> fa,
@@ -4039,7 +4882,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
     @Test(dataProvider = "intCompareOpMaskProvider")
     static void LTInt128VectorTestsBroadcastLongMaskedSmokeTest(IntFunction<int[]> fa,
                                 IntFunction<int[]> fb, IntFunction<boolean[]> fm) {
@@ -4076,7 +4918,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
-
     @Test(dataProvider = "intCompareOpMaskProvider")
     static void EQInt128VectorTestsBroadcastMaskedSmokeTest(IntFunction<int[]> fa,
                                 IntFunction<int[]> fb, IntFunction<boolean[]> fm) {
@@ -4112,7 +4953,6 @@ public class Int128VectorTests extends AbstractVectorTest {
             }
         }
     }
-
 
     @Test(dataProvider = "intCompareOpMaskProvider")
     static void EQInt128VectorTestsBroadcastLongMaskedSmokeTest(IntFunction<int[]> fa,
@@ -4192,6 +5032,43 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertRearrangeArraysEquals(r, a, order, mask, SPECIES.length());
     }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void compressInt128VectorTests(IntFunction<int[]> fa,
+                                                IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.compress(vmask).intoArray(r, i);
+            }
+        }
+
+        assertcompressArraysEquals(r, a, mask, SPECIES.length());
+    }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void expandInt128VectorTests(IntFunction<int[]> fa,
+                                                IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.expand(vmask).intoArray(r, i);
+            }
+        }
+
+        assertexpandArraysEquals(r, a, mask, SPECIES.length());
+    }
+
     @Test(dataProvider = "intUnaryOpProvider")
     static void getInt128VectorTests(IntFunction<int[]> fa) {
         int[] a = fa.apply(SPECIES.length());
@@ -4345,7 +5222,7 @@ public class Int128VectorTests extends AbstractVectorTest {
             }
         }
 
-        assertArraysEquals(r, a, Int128VectorTests::get);
+        assertArraysStrictlyEquals(r, a);
     }
 
     @Test(dataProvider = "intUnaryOpProvider")
@@ -4362,10 +5239,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertBroadcastArraysEquals(r, a);
     }
 
-
-
-
-
     @Test(dataProvider = "intUnaryOpProvider")
     static void ZeroInt128VectorTests(IntFunction<int[]> fa) {
         int[] a = fa.apply(SPECIES.length());
@@ -4379,9 +5252,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         Assert.assertEquals(a, r);
     }
-
-
-
 
     static int[] sliceUnary(int[] a, int origin, int idx) {
         int[] res = new int[SPECIES.length()];
@@ -4398,7 +5268,7 @@ public class Int128VectorTests extends AbstractVectorTest {
     static void sliceUnaryInt128VectorTests(IntFunction<int[]> fa) {
         int[] a = fa.apply(SPECIES.length());
         int[] r = new int[a.length];
-        int origin = (new java.util.Random()).nextInt(SPECIES.length());
+        int origin = RAND.nextInt(SPECIES.length());
         for (int ic = 0; ic < INVOC_COUNT; ic++) {
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
@@ -4408,6 +5278,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, origin, Int128VectorTests::sliceUnary);
     }
+
     static int[] sliceBinary(int[] a, int[] b, int origin, int idx) {
         int[] res = new int[SPECIES.length()];
         for (int i = 0, j = 0; i < SPECIES.length(); i++){
@@ -4426,7 +5297,7 @@ public class Int128VectorTests extends AbstractVectorTest {
         int[] a = fa.apply(SPECIES.length());
         int[] b = fb.apply(SPECIES.length());
         int[] r = new int[a.length];
-        int origin = (new java.util.Random()).nextInt(SPECIES.length());
+        int origin = RAND.nextInt(SPECIES.length());
         for (int ic = 0; ic < INVOC_COUNT; ic++) {
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
@@ -4437,6 +5308,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, origin, Int128VectorTests::sliceBinary);
     }
+
     static int[] slice(int[] a, int[] b, int origin, boolean[] mask, int idx) {
         int[] res = new int[SPECIES.length()];
         for (int i = 0, j = 0; i < SPECIES.length(); i++){
@@ -4459,7 +5331,7 @@ public class Int128VectorTests extends AbstractVectorTest {
         VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
 
         int[] r = new int[a.length];
-        int origin = (new java.util.Random()).nextInt(SPECIES.length());
+        int origin = RAND.nextInt(SPECIES.length());
         for (int ic = 0; ic < INVOC_COUNT; ic++) {
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
@@ -4470,6 +5342,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, origin, mask, Int128VectorTests::slice);
     }
+
     static int[] unsliceUnary(int[] a, int origin, int idx) {
         int[] res = new int[SPECIES.length()];
         for (int i = 0, j = 0; i < SPECIES.length(); i++){
@@ -4487,7 +5360,7 @@ public class Int128VectorTests extends AbstractVectorTest {
     static void unsliceUnaryInt128VectorTests(IntFunction<int[]> fa) {
         int[] a = fa.apply(SPECIES.length());
         int[] r = new int[a.length];
-        int origin = (new java.util.Random()).nextInt(SPECIES.length());
+        int origin = RAND.nextInt(SPECIES.length());
         for (int ic = 0; ic < INVOC_COUNT; ic++) {
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
@@ -4497,6 +5370,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, origin, Int128VectorTests::unsliceUnary);
     }
+
     static int[] unsliceBinary(int[] a, int[] b, int origin, int part, int idx) {
         int[] res = new int[SPECIES.length()];
         for (int i = 0, j = 0; i < SPECIES.length(); i++){
@@ -4524,8 +5398,8 @@ public class Int128VectorTests extends AbstractVectorTest {
         int[] a = fa.apply(SPECIES.length());
         int[] b = fb.apply(SPECIES.length());
         int[] r = new int[a.length];
-        int origin = (new java.util.Random()).nextInt(SPECIES.length());
-        int part = (new java.util.Random()).nextInt(2);
+        int origin = RAND.nextInt(SPECIES.length());
+        int part = RAND.nextInt(2);
         for (int ic = 0; ic < INVOC_COUNT; ic++) {
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
@@ -4536,6 +5410,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, origin, part, Int128VectorTests::unsliceBinary);
     }
+
     static int[] unslice(int[] a, int[] b, int origin, int part, boolean[] mask, int idx) {
         int[] res = new int[SPECIES.length()];
         for (int i = 0, j = 0; i < SPECIES.length(); i++){
@@ -4580,8 +5455,8 @@ public class Int128VectorTests extends AbstractVectorTest {
         boolean[] mask = fm.apply(SPECIES.length());
         VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
         int[] r = new int[a.length];
-        int origin = (new java.util.Random()).nextInt(SPECIES.length());
-        int part = (new java.util.Random()).nextInt(2);
+        int origin = RAND.nextInt(SPECIES.length());
+        int part = RAND.nextInt(2);
         for (int ic = 0; ic < INVOC_COUNT; ic++) {
             for (int i = 0; i < a.length; i += SPECIES.length()) {
                 IntVector av = IntVector.fromArray(SPECIES, a, i);
@@ -4593,35 +5468,13 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, b, origin, part, mask, Int128VectorTests::unslice);
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     static int BITWISE_BLEND(int a, int b, int c) {
         return (int)((a&~(c))|(b&c));
     }
+
     static int bitwiseBlend(int a, int b, int c) {
         return (int)((a&~(c))|(b&c));
     }
-
 
     @Test(dataProvider = "intTernaryOpProvider")
     static void BITWISE_BLENDInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb, IntFunction<int[]> fc) {
@@ -4641,6 +5494,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, c, Int128VectorTests::BITWISE_BLEND);
     }
+
     @Test(dataProvider = "intTernaryOpProvider")
     static void bitwiseBlendInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb, IntFunction<int[]> fc) {
         int[] a = fa.apply(SPECIES.length());
@@ -4657,7 +5511,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, c, Int128VectorTests::bitwiseBlend);
     }
-
 
     @Test(dataProvider = "intTernaryOpMaskProvider")
     static void BITWISE_BLENDInt128VectorTestsMasked(IntFunction<int[]> fa, IntFunction<int[]> fb,
@@ -4680,9 +5533,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, b, c, mask, Int128VectorTests::BITWISE_BLEND);
     }
-
-
-
 
     @Test(dataProvider = "intTernaryOpProvider")
     static void BITWISE_BLENDInt128VectorTestsBroadcastSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb, IntFunction<int[]> fc) {
@@ -4713,6 +5563,7 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
         assertAltBroadcastArraysEquals(r, a, b, c, Int128VectorTests::BITWISE_BLEND);
     }
+
     @Test(dataProvider = "intTernaryOpProvider")
     static void bitwiseBlendInt128VectorTestsBroadcastSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb, IntFunction<int[]> fc) {
         int[] a = fa.apply(SPECIES.length());
@@ -4742,7 +5593,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
         assertAltBroadcastArraysEquals(r, a, b, c, Int128VectorTests::bitwiseBlend);
     }
-
 
     @Test(dataProvider = "intTernaryOpMaskProvider")
     static void BITWISE_BLENDInt128VectorTestsBroadcastMaskedSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb,
@@ -4782,9 +5632,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertAltBroadcastArraysEquals(r, a, b, c, mask, Int128VectorTests::BITWISE_BLEND);
     }
 
-
-
-
     @Test(dataProvider = "intTernaryOpProvider")
     static void BITWISE_BLENDInt128VectorTestsDoubleBroadcastSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb, IntFunction<int[]> fc) {
         int[] a = fa.apply(SPECIES.length());
@@ -4799,6 +5646,7 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertDoubleBroadcastArraysEquals(r, a, b, c, Int128VectorTests::BITWISE_BLEND);
     }
+
     @Test(dataProvider = "intTernaryOpProvider")
     static void bitwiseBlendInt128VectorTestsDoubleBroadcastSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb, IntFunction<int[]> fc) {
         int[] a = fa.apply(SPECIES.length());
@@ -4813,7 +5661,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertDoubleBroadcastArraysEquals(r, a, b, c, Int128VectorTests::bitwiseBlend);
     }
-
 
     @Test(dataProvider = "intTernaryOpMaskProvider")
     static void BITWISE_BLENDInt128VectorTestsDoubleBroadcastMaskedSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb,
@@ -4832,7 +5679,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertDoubleBroadcastArraysEquals(r, a, b, c, mask, Int128VectorTests::BITWISE_BLEND);
     }
-
 
     static int NEG(int a) {
         return (int)(-((int)a));
@@ -4946,7 +5792,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, mask, Int128VectorTests::ABS);
     }
 
-
     static int NOT(int a) {
         return (int)(~((int)a));
     }
@@ -4954,8 +5799,6 @@ public class Int128VectorTests extends AbstractVectorTest {
     static int not(int a) {
         return (int)(~((int)a));
     }
-
-
 
     @Test(dataProvider = "intUnaryOpProvider")
     static void NOTInt128VectorTests(IntFunction<int[]> fa) {
@@ -4987,8 +5830,6 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, Int128VectorTests::not);
     }
 
-
-
     @Test(dataProvider = "intUnaryOpMaskProvider")
     static void NOTMaskedInt128VectorTests(IntFunction<int[]> fa,
                                                 IntFunction<boolean[]> fm) {
@@ -5007,13 +5848,9 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, mask, Int128VectorTests::NOT);
     }
 
-
-
     static int ZOMO(int a) {
         return (int)((a==0?0:-1));
     }
-
-
 
     @Test(dataProvider = "intUnaryOpProvider")
     static void ZOMOInt128VectorTests(IntFunction<int[]> fa) {
@@ -5029,8 +5866,6 @@ public class Int128VectorTests extends AbstractVectorTest {
 
         assertArraysEquals(r, a, Int128VectorTests::ZOMO);
     }
-
-
 
     @Test(dataProvider = "intUnaryOpMaskProvider")
     static void ZOMOMaskedInt128VectorTests(IntFunction<int[]> fa,
@@ -5050,9 +5885,190 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertArraysEquals(r, a, mask, Int128VectorTests::ZOMO);
     }
 
+    static int BIT_COUNT(int a) {
+        return (int)(Integer.bitCount(a));
+    }
 
+    @Test(dataProvider = "intUnaryOpProvider")
+    static void BIT_COUNTInt128VectorTests(IntFunction<int[]> fa) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
 
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.BIT_COUNT).intoArray(r, i);
+            }
+        }
 
+        assertArraysEquals(r, a, Int128VectorTests::BIT_COUNT);
+    }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void BIT_COUNTMaskedInt128VectorTests(IntFunction<int[]> fa,
+                                                IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.BIT_COUNT, vmask).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, mask, Int128VectorTests::BIT_COUNT);
+    }
+
+    static int TRAILING_ZEROS_COUNT(int a) {
+        return (int)(TRAILING_ZEROS_COUNT_scalar(a));
+    }
+
+    @Test(dataProvider = "intUnaryOpProvider")
+    static void TRAILING_ZEROS_COUNTInt128VectorTests(IntFunction<int[]> fa) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.TRAILING_ZEROS_COUNT).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, Int128VectorTests::TRAILING_ZEROS_COUNT);
+    }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void TRAILING_ZEROS_COUNTMaskedInt128VectorTests(IntFunction<int[]> fa,
+                                                IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.TRAILING_ZEROS_COUNT, vmask).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, mask, Int128VectorTests::TRAILING_ZEROS_COUNT);
+    }
+
+    static int LEADING_ZEROS_COUNT(int a) {
+        return (int)(LEADING_ZEROS_COUNT_scalar(a));
+    }
+
+    @Test(dataProvider = "intUnaryOpProvider")
+    static void LEADING_ZEROS_COUNTInt128VectorTests(IntFunction<int[]> fa) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.LEADING_ZEROS_COUNT).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, Int128VectorTests::LEADING_ZEROS_COUNT);
+    }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void LEADING_ZEROS_COUNTMaskedInt128VectorTests(IntFunction<int[]> fa,
+                                                IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.LEADING_ZEROS_COUNT, vmask).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, mask, Int128VectorTests::LEADING_ZEROS_COUNT);
+    }
+
+    static int REVERSE(int a) {
+        return (int)(REVERSE_scalar(a));
+    }
+
+    @Test(dataProvider = "intUnaryOpProvider")
+    static void REVERSEInt128VectorTests(IntFunction<int[]> fa) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.REVERSE).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, Int128VectorTests::REVERSE);
+    }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void REVERSEMaskedInt128VectorTests(IntFunction<int[]> fa,
+                                                IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.REVERSE, vmask).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, mask, Int128VectorTests::REVERSE);
+    }
+
+    static int REVERSE_BYTES(int a) {
+        return (int)(Integer.reverseBytes(a));
+    }
+
+    @Test(dataProvider = "intUnaryOpProvider")
+    static void REVERSE_BYTESInt128VectorTests(IntFunction<int[]> fa) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.REVERSE_BYTES).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, Int128VectorTests::REVERSE_BYTES);
+    }
+
+    @Test(dataProvider = "intUnaryOpMaskProvider")
+    static void REVERSE_BYTESMaskedInt128VectorTests(IntFunction<int[]> fa,
+                                                IntFunction<boolean[]> fm) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+        boolean[] mask = fm.apply(SPECIES.length());
+        VectorMask<Integer> vmask = VectorMask.fromArray(SPECIES, mask, 0);
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                av.lanewise(VectorOperators.REVERSE_BYTES, vmask).intoArray(r, i);
+            }
+        }
+
+        assertArraysEquals(r, a, mask, Int128VectorTests::REVERSE_BYTES);
+    }
 
     @Test(dataProvider = "intCompareOpProvider")
     static void ltInt128VectorTestsBroadcastSmokeTest(IntFunction<int[]> fa, IntFunction<int[]> fb) {
@@ -5272,6 +6288,24 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertSelectFromArraysEquals(r, a, order, SPECIES.length());
     }
 
+    @Test(dataProvider = "intSelectFromTwoVectorOpProvider")
+    static void SelectFromTwoVectorInt128VectorTests(IntFunction<int[]> fa, IntFunction<int[]> fb, IntFunction<int[]> fc) {
+        int[] a = fa.apply(SPECIES.length());
+        int[] b = fb.apply(SPECIES.length());
+        int[] idx = fc.apply(SPECIES.length());
+        int[] r = fr.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT; ic++) {
+            for (int i = 0; i < idx.length; i += SPECIES.length()) {
+                IntVector av = IntVector.fromArray(SPECIES, a, i);
+                IntVector bv = IntVector.fromArray(SPECIES, b, i);
+                IntVector idxv = IntVector.fromArray(SPECIES, idx, i);
+                idxv.selectFrom(av, bv).intoArray(r, i);
+            }
+        }
+        assertSelectFromTwoVectorEquals(r, idx, a, b, SPECIES.length());
+    }
+
     @Test(dataProvider = "intUnaryOpShuffleMaskProvider")
     static void SelectFromInt128VectorTestsMaskedSmokeTest(IntFunction<int[]> fa,
                                                            BiFunction<Integer,Integer,int[]> fs,
@@ -5347,6 +6381,82 @@ public class Int128VectorTests extends AbstractVectorTest {
             int to = i + SPECIES.length();
             Assert.assertEquals(equals, Arrays.equals(a, i, to, b, i, to));
         }
+    }
+
+    static boolean band(boolean a, boolean b) {
+        return a & b;
+    }
+
+    @Test(dataProvider = "maskCompareOpProvider")
+    static void maskAndInt128VectorTestsSmokeTest(IntFunction<boolean[]> fa, IntFunction<boolean[]> fb) {
+        boolean[] a = fa.apply(SPECIES.length());
+        boolean[] b = fb.apply(SPECIES.length());
+        boolean[] r = new boolean[a.length];
+
+        for (int i = 0; i < a.length; i += SPECIES.length()) {
+            var av = SPECIES.loadMask(a, i);
+            var bv = SPECIES.loadMask(b, i);
+            var cv = av.and(bv);
+            cv.intoArray(r, i);
+        }
+        assertArraysEquals(r, a, b, Int128VectorTests::band);
+    }
+
+    static boolean bor(boolean a, boolean b) {
+        return a | b;
+    }
+
+    @Test(dataProvider = "maskCompareOpProvider")
+    static void maskOrInt128VectorTestsSmokeTest(IntFunction<boolean[]> fa, IntFunction<boolean[]> fb) {
+        boolean[] a = fa.apply(SPECIES.length());
+        boolean[] b = fb.apply(SPECIES.length());
+        boolean[] r = new boolean[a.length];
+
+        for (int i = 0; i < a.length; i += SPECIES.length()) {
+            var av = SPECIES.loadMask(a, i);
+            var bv = SPECIES.loadMask(b, i);
+            var cv = av.or(bv);
+            cv.intoArray(r, i);
+        }
+        assertArraysEquals(r, a, b, Int128VectorTests::bor);
+    }
+
+    static boolean bxor(boolean a, boolean b) {
+        return a != b;
+    }
+
+    @Test(dataProvider = "maskCompareOpProvider")
+    static void maskXorInt128VectorTestsSmokeTest(IntFunction<boolean[]> fa, IntFunction<boolean[]> fb) {
+        boolean[] a = fa.apply(SPECIES.length());
+        boolean[] b = fb.apply(SPECIES.length());
+        boolean[] r = new boolean[a.length];
+
+        for (int i = 0; i < a.length; i += SPECIES.length()) {
+            var av = SPECIES.loadMask(a, i);
+            var bv = SPECIES.loadMask(b, i);
+            var cv = av.xor(bv);
+            cv.intoArray(r, i);
+        }
+        assertArraysEquals(r, a, b, Int128VectorTests::bxor);
+    }
+
+    static boolean bandNot(boolean a, boolean b) {
+        return a & !b;
+    }
+
+    @Test(dataProvider = "maskCompareOpProvider")
+    static void maskAndNotInt128VectorTestsSmokeTest(IntFunction<boolean[]> fa, IntFunction<boolean[]> fb) {
+        boolean[] a = fa.apply(SPECIES.length());
+        boolean[] b = fb.apply(SPECIES.length());
+        boolean[] r = new boolean[a.length];
+
+        for (int i = 0; i < a.length; i += SPECIES.length()) {
+            var av = SPECIES.loadMask(a, i);
+            var bv = SPECIES.loadMask(b, i);
+            var cv = av.andNot(bv);
+            cv.intoArray(r, i);
+        }
+        assertArraysEquals(r, a, b, Int128VectorTests::bandNot);
     }
 
     static boolean beq(boolean a, boolean b) {
@@ -5455,6 +6565,23 @@ public class Int128VectorTests extends AbstractVectorTest {
         assertMaskReductionArraysEquals(r, a, Int128VectorTests::maskFirstTrue);
     }
 
+    @Test(dataProvider = "maskProvider")
+    static void maskCompressInt128VectorTestsSmokeTest(IntFunction<boolean[]> fa) {
+        int trueCount = 0;
+        boolean[] a = fa.apply(SPECIES.length());
+
+        for (int ic = 0; ic < INVOC_COUNT * INVOC_COUNT; ic++) {
+            for (int i = 0; i < a.length; i += SPECIES.length()) {
+                var vmask = SPECIES.loadMask(a, i);
+                trueCount = vmask.trueCount();
+                var rmask = vmask.compress();
+                for (int j = 0; j < SPECIES.length(); j++)  {
+                    Assert.assertEquals(rmask.laneIsSet(j), j < trueCount);
+                }
+            }
+        }
+    }
+
     @DataProvider
     public static Object[][] longMaskProvider() {
         return new Object[][]{
@@ -5497,6 +6624,20 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 
+    @Test(dataProvider = "offsetProvider")
+    static void indexInRangeLongInt128VectorTestsSmokeTest(int offset) {
+        long limit = SPECIES.length() * BUFFER_REPS;
+        for (long i = 0; i < limit; i += SPECIES.length()) {
+            var actualMask = SPECIES.indexInRange(i + offset, limit);
+            var expectedMask = SPECIES.maskAll(true).indexInRange(i + offset, limit);
+            assert(actualMask.equals(expectedMask));
+            for (int j = 0; j < SPECIES.length(); j++)  {
+                long index = i + j + offset;
+                Assert.assertEquals(actualMask.laneIsSet(j), index >= 0 && index < limit);
+            }
+        }
+    }
+
     @DataProvider
     public static Object[][] lengthProvider() {
         return new Object[][]{
@@ -5514,6 +6655,14 @@ public class Int128VectorTests extends AbstractVectorTest {
     static void loopBoundInt128VectorTestsSmokeTest(int length) {
         int actualLoopBound = SPECIES.loopBound(length);
         int expectedLoopBound = length - Math.floorMod(length, SPECIES.length());
+        Assert.assertEquals(actualLoopBound, expectedLoopBound);
+    }
+
+    @Test(dataProvider = "lengthProvider")
+    static void loopBoundLongInt128VectorTestsSmokeTest(int _length) {
+        long length = _length;
+        long actualLoopBound = SPECIES.loopBound(length);
+        long expectedLoopBound = length - Math.floorMod(length, SPECIES.length());
         Assert.assertEquals(actualLoopBound, expectedLoopBound);
     }
 
@@ -5579,4 +6728,3 @@ public class Int128VectorTests extends AbstractVectorTest {
         }
     }
 }
-

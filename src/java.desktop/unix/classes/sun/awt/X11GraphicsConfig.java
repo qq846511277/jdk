@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -98,7 +98,7 @@ public class X11GraphicsConfig extends GraphicsConfiguration
      * as this was the method used in jdk 1.2 beta4 to create the
      * X11GraphicsConfig objects. Java3D code had called this method
      * explicitly so without this, if a user tries to use JDK1.2 fcs
-     * with Java3D beta1, a NoSuchMethod execption is thrown and
+     * with Java3D beta1, a NoSuchMethod exception is thrown and
      * the program exits. REMOVE this method after Java3D fcs is
      * released!
      */
@@ -180,8 +180,8 @@ public class X11GraphicsConfig extends GraphicsConfiguration
     }
 
     @Override
-    public Object getProxyKey() {
-        return device.getProxyKeyFor(getSurfaceType());
+    public SurfaceManager.ProxyCache getSurfaceDataProxyCache() {
+        return device.getProxyCacheFor(getSurfaceType());
     }
 
     /**

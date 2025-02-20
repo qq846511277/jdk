@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -74,8 +74,7 @@ public class MFontConfiguration extends FontConfiguration {
         reorderMap.put("UTF-8.zh.TW", "chinese-tw-iso10646");
         reorderMap.put("UTF-8.zh.HK", "chinese-tw-iso10646");
         reorderMap.put("UTF-8.zh.CN", "chinese-cn-iso10646");
-        reorderMap.put("x-euc-jp-linux",
-                        split("japanese-x0201,japanese-x0208"));
+        reorderMap.put("x-euc-jp-linux", new String[] {"japanese-x0201", "japanese-x0208"});
         reorderMap.put("GB2312", "chinese-gb18030");
         reorderMap.put("Big5", "chinese-big5");
         reorderMap.put("EUC-KR", "korean");
@@ -112,8 +111,20 @@ public class MFontConfiguration extends FontConfiguration {
                     try (FileInputStream fis = new FileInputStream(f)) {
                         props.load(fis);
                     }
-                    osName = props.getProperty("DISTRIB_ID");
-                    osVersion =  props.getProperty("DISTRIB_RELEASE");
+                    osName = extractInfo(props.getProperty("DISTRIB_ID"));
+                    osVersion = extractInfo(props.getProperty("DISTRIB_RELEASE"));
+                } else if ((f = new File("/etc/os-release")).canRead()) {
+                    Properties props = new Properties();
+                    try (FileInputStream fis = new FileInputStream(f)) {
+                        props.load(fis);
+                    }
+                    osName = extractInfo(props.getProperty("NAME"));
+                    osVersion = extractInfo(props.getProperty("VERSION_ID"));
+                    if (osName.equals("SLES")) {
+                        osName = "SuSE";
+                    } else {
+                        osName = extractInfo(props.getProperty("ID"));
+                    }
                 }
             } catch (Exception e) {
             }
@@ -132,6 +143,16 @@ public class MFontConfiguration extends FontConfiguration {
         catch (Exception e){
         }
         return null;
+    }
+
+    private String extractInfo(String s) {
+        if (s == null) {
+            return null;
+        }
+        if (s.startsWith("\"")) s = s.substring(1);
+        if (s.endsWith("\"")) s = s.substring(0, s.length()-1);
+        s = s.replace(' ', '_');
+        return s;
     }
 
     private static final String fontsDirPrefix = "$JRE_LIB_FONTS";

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,9 +35,6 @@ import java.io.FileDescriptor;
 import java.io.IOException;
 import java.io.PrintStream;
 
-import sun.net.sdp.SdpSupport;
-import sun.security.action.GetPropertyAction;
-
 /**
  * A NetHooks provider that converts sockets from the TCP to SDP protocol prior
  * to binding or connecting.
@@ -55,7 +52,7 @@ public class SdpProvider extends NetHooks.Provider {
     private PrintStream log;
 
     public SdpProvider() {
-        Properties props = GetPropertyAction.privilegedGetProperties();
+        Properties props = System.getProperties();
         // if this property is not defined then there is nothing to do.
         String file = props.getProperty("com.sun.sdp.conf");
         if (file == null) {
@@ -192,8 +189,7 @@ public class SdpProvider extends NetHooks.Provider {
     private static List<Rule> loadRulesFromFile(String file)
         throws IOException
     {
-        Scanner scanner = new Scanner(new File(file));
-        try {
+        try (Scanner scanner = new Scanner(new File(file))) {
             List<Rule> result = new ArrayList<>();
             while (scanner.hasNextLine()) {
                 String line = scanner.nextLine().trim();
@@ -279,8 +275,6 @@ public class SdpProvider extends NetHooks.Provider {
                 }
             }
             return result;
-        } finally {
-            scanner.close();
         }
     }
 

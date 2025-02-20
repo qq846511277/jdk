@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,6 +46,9 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 @BenchmarkMode(Mode.SingleShotTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Thread)
+@Warmup(iterations = 5, time = 1)
+@Measurement(iterations = 5, time = 1)
+@Fork(value = 3)
 public class SocketChannelConnectionSetup {
 
     private ServerSocketChannel ssc;
@@ -122,7 +125,7 @@ public class SocketChannelConnectionSetup {
 
         opt = new OptionsBuilder()
                 .include(org.openjdk.bench.java.net.SocketChannelConnectionSetup.class.getSimpleName())
-                .jvmArgsPrepend("-Djdk.net.useFastTcpLoopback=true")
+                .jvmArgs("-Djdk.net.useFastTcpLoopback=true")
                 .warmupForks(1)
                 .forks(2)
                 .build();

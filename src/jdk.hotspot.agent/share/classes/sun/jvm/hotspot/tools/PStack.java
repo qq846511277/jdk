@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -72,13 +72,20 @@ public class PStack extends Tool {
          // compute and cache java Vframes.
          initJFrameCache();
          if (concurrentLocks) {
-            concLocksPrinter = new ConcurrentLocksPrinter();
+            concLocksPrinter = new ConcurrentLocksPrinter(out);
          }
          // print Java level deadlocks
          try {
             DeadlockDetector.print(out);
          } catch (Exception exp) {
-            out.println("can't print deadlock information: " + exp.getMessage());
+            out.println("can't print deadlock information: " + exp);
+         }
+
+         try {
+             VMLocksPrinter vmLocksPrinter = new VMLocksPrinter(out);
+             vmLocksPrinter.printVMLocks();
+         } catch (Exception e) {
+             out.println("can't print VM locks information: " + e);
          }
 
          List<ThreadProxy> l = cdbg.getThreadList();
@@ -97,7 +104,7 @@ public class PStack extends Tool {
                out.print("----------------- ");
                out.print(th);
                out.println(" -----------------");
-               JavaThread jthread = (JavaThread) proxyToThread.get(th);
+               JavaThread jthread = proxyToThread.get(th);
                if (jthread != null) {
                   jthread.printThreadInfoOn(out);
                }
@@ -140,7 +147,7 @@ public class PStack extends Tool {
                             CodeBlob cb = c.findBlobUnsafe(pc);
                             if (cb.isNMethod()) {
                                if (cb.isNativeMethod()) {
-                                  out.print(((CompiledMethod)cb).getMethod().externalNameAndSignature());
+                                  out.print(((NMethod)cb).getMethod().externalNameAndSignature());
                                   long diff = pc.minus(cb.codeBegin());
                                   if (diff != 0L) {
                                     out.print(" + 0x" + Long.toHexString(diff));
@@ -155,16 +162,24 @@ public class PStack extends Tool {
                                }
                             } else if (cb.isBufferBlob()) {
                                out.println("<StubRoutines>");
+                            } else if (cb.isAdapterBlob()) {
+                               out.println("<AdapterBlob>");
+                            } else if (cb.isVtableBlob()) {
+                               out.println("<VtableBlob>");
+                            } else if (cb.isMHAdapterBlob()) {
+                               out.println("<MethodHandlesAdapterBlob>");
                             } else if (cb.isRuntimeStub()) {
                                out.println("<RuntimeStub>");
-                            } else if (cb.isDeoptimizationStub()) {
-                               out.println("<DeoptimizationStub>");
-                            } else if (cb.isUncommonTrapStub()) {
-                               out.println("<UncommonTrap>");
-                            } else if (cb.isExceptionStub()) {
-                               out.println("<ExceptionStub>");
-                            } else if (cb.isSafepointStub()) {
-                               out.println("<SafepointStub>");
+                            } else if (cb.isUpcallStub()) {
+                               out.println("<UpcallStub>");
+                            } else if (cb.isDeoptimizationBlob()) {
+                               out.println("<DeoptimizationBlob>");
+                            } else if (cb.isUncommonTrapBlob()) {
+                               out.println("<UncommonTrapBlob>");
+                            } else if (cb.isExceptionBlob()) {
+                               out.println("<ExceptionBlob>");
+                            } else if (cb.isSafepointBlob()) {
+                               out.println("<SafepointBlob>");
                             } else {
                                out.println("<Unknown code blob>");
                             }
@@ -190,9 +205,9 @@ public class PStack extends Tool {
                // continue, may be we can do a better job for other threads
             }
             if (concurrentLocks) {
-               JavaThread jthread = (JavaThread) proxyToThread.get(th);
+               JavaThread jthread = proxyToThread.get(th);
                if (jthread != null) {
-                   concLocksPrinter.print(jthread, out);
+                   concLocksPrinter.print(jthread);
                }
             }
          } // for threads
@@ -248,7 +263,7 @@ public class PStack extends Tool {
       if (fp == null) {
          return null;
       }
-      JavaVFrame[] jvframes = (JavaVFrame[]) jframeCache.get(th);
+      JavaVFrame[] jvframes = jframeCache.get(th);
       if (jvframes == null) return null; // not a java thread
       List<String> names = new ArrayList<>(10);
       for (int fCount = 0; fCount < jvframes.length; fCount++) {

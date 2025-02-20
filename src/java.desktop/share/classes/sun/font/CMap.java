@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -577,7 +577,7 @@ abstract class CMap {
             /*
              * CMAP format4 defines several fields for optimized search of
              * the segment list (entrySelector, searchRange, rangeShift).
-             * However, benefits are neglible and some fonts have incorrect
+             * However, benefits are negligible and some fonts have incorrect
              * data - so we use straightforward binary search (see bug 6247425)
              */
             int left = 0, right = startCount.length;
@@ -613,9 +613,6 @@ abstract class CMap {
                         glyphCode = (char)(glyphCode + idDelta[index]);
                     }
                 }
-            }
-            if (glyphCode == 0) {
-              glyphCode = getFormatCharGlyph(origCharCode);
             }
             return glyphCode;
         }
@@ -725,7 +722,7 @@ abstract class CMap {
 
         char[] subHeaderKey = new char[256];
          /* Store subheaders in individual arrays
-          * A SubHeader entry theortically looks like {
+          * A SubHeader entry theoretically looks like {
           *   char firstCode;
           *   char entryCount;
           *   short idDelta;
@@ -837,7 +834,7 @@ abstract class CMap {
                     return glyphCode;
                 }
             }
-            return getFormatCharGlyph(origCharCode);
+            return 0;
         }
     }
 
@@ -873,7 +870,7 @@ abstract class CMap {
 
              charCode -= firstCode;
              if (charCode < 0 || charCode >= entryCount) {
-                  return getFormatCharGlyph(origCharCode);
+                  return 0;
              } else {
                   return glyphIdArray[charCode];
              }
@@ -1049,9 +1046,8 @@ abstract class CMap {
                     (startGlyphID[range] + (charCode - startCharCode[range]));
             }
 
-            return getFormatCharGlyph(origCharCode);
+            return 0;
         }
-
     }
 
     /* Used to substitute for bad Cmaps. */
@@ -1075,17 +1071,6 @@ abstract class CMap {
             return 0;
         }
         return -1;
-    }
-
-    final char getFormatCharGlyph(int charCode) {
-        if (charCode >= 0x200c) {
-            if ((charCode <= 0x200f) ||
-                (charCode >= 0x2028 && charCode <= 0x202e) ||
-                (charCode >= 0x206a && charCode <= 0x206f)) {
-                return (char)CharToGlyphMapper.INVISIBLE_GLYPH_ID;
-            }
-        }
-        return 0;
     }
 
     static class UVS {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,7 +21,6 @@
  * questions.
  */
 
-#include "precompiled.hpp"
 #include "gc/z/zArray.inline.hpp"
 #include "unittest.hpp"
 
@@ -39,11 +38,11 @@ TEST(ZArray, sanity) {
 
   // Check size
   ASSERT_EQ(a.length(), 0);
-  ASSERT_EQ(a.max_length(), 0);
+  ASSERT_EQ(a.capacity(), 0);
   ASSERT_EQ(a.is_empty(), true);
 
   ASSERT_EQ(b.length(), 10);
-  ASSERT_GE(b.max_length(), 10);
+  ASSERT_GE(b.capacity(), 10);
   ASSERT_EQ(b.is_empty(), false);
 
   // Clear elements
@@ -51,14 +50,14 @@ TEST(ZArray, sanity) {
 
   // Check that b is unaffected
   ASSERT_EQ(b.length(), 10);
-  ASSERT_GE(b.max_length(), 10);
+  ASSERT_GE(b.capacity(), 10);
   ASSERT_EQ(b.is_empty(), false);
 
   a.append(1);
 
   // Check that b is unaffected
   ASSERT_EQ(b.length(), 10);
-  ASSERT_GE(b.max_length(), 10);
+  ASSERT_GE(b.capacity(), 10);
   ASSERT_EQ(b.is_empty(), false);
 }
 

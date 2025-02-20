@@ -28,6 +28,7 @@ package java.io;
 import java.lang.ref.Reference;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.SoftReference;
+import java.util.Objects;
 
 // Maps Class instances to values of type T. Under memory pressure, the
 // mapping is released (under soft references GC policy) and would be
@@ -38,19 +39,34 @@ abstract class ClassCache<T> {
 
     private static class CacheRef<T> extends SoftReference<T> {
         private final Class<?> type;
+        // This field is deliberately accessed without sychronization. ClassValue
+        // provides synchronization when CacheRef is published. However, when
+        // a thread reads this field, while another thread is clearing the field, it
+        // would formally constitute a data race. But that data race is benign, and
+        // fixing it could introduce noticeable performance penalty, see JDK-8309688.
+        private T strongReferent;
 
         CacheRef(T referent, ReferenceQueue<T> queue, Class<?> type) {
             super(referent, queue);
             this.type = type;
+            this.strongReferent = referent;
         }
 
         Class<?> getType() {
             return type;
         }
+
+        T getStrong() {
+            return strongReferent;
+        }
+
+        void clearStrong() {
+            strongReferent = null;
+        }
     }
 
     private final ReferenceQueue<T> queue;
-    private final ClassValue<SoftReference<T>> map;
+    private final ClassValue<CacheRef<T>> map;
 
     protected abstract T computeValue(Class<?> cl);
 
@@ -58,23 +74,41 @@ abstract class ClassCache<T> {
         queue = new ReferenceQueue<>();
         map = new ClassValue<>() {
             @Override
-            protected SoftReference<T> computeValue(Class<?> type) {
-                return new CacheRef<>(ClassCache.this.computeValue(type), queue, type);
+            protected CacheRef<T> computeValue(Class<?> type) {
+                T v = ClassCache.this.computeValue(type);
+                Objects.requireNonNull(v);
+                return new CacheRef<>(v, queue, type);
             }
         };
     }
 
     T get(Class<?> cl) {
-        processQueue();
-        T val;
-        do {
-            SoftReference<T> ref = map.get(cl);
-            val = ref.get();
-            if (val == null) {
-                map.remove(cl);
+        while (true) {
+            processQueue();
+
+            CacheRef<T> ref = map.get(cl);
+
+            // Case 1: A recently created CacheRef.
+            // We might still have strong referent, and can return it.
+            // This guarantees progress for at least one thread on every CacheRef.
+            // Clear the strong referent before returning to make the cache soft.
+            T strongVal = ref.getStrong();
+            if (strongVal != null) {
+                ref.clearStrong();
+                return strongVal;
             }
-        } while (val == null);
-        return val;
+
+            // Case 2: Older or recently cleared CacheRef.
+            // Check if its soft referent is still available, and return it.
+            T val = ref.get();
+            if (val != null) {
+                return val;
+            }
+
+            // Case 3: The reference was cleared.
+            // Clear the mapping and retry.
+            map.remove(cl);
+        }
     }
 
     private void processQueue() {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -56,6 +56,7 @@ import org.testng.annotations.AfterTest;
 import org.testng.annotations.BeforeTest;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
+import org.testng.SkipException;
 import static java.net.http.HttpClient.Builder.NO_PROXY;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.nio.file.StandardOpenOption.CREATE;
@@ -74,6 +75,8 @@ public class SimpleFileServerTest {
 
     static final boolean ENABLE_LOGGING = true;
     static final Logger LOGGER = Logger.getLogger("com.sun.net.httpserver");
+
+    static final String EXPECTED_LAST_MODIFIED_OF_FAVICON = "Mon, 23 May 1995 11:11:11 GMT";
 
     @BeforeTest
     public void setup() throws IOException {
@@ -136,6 +139,65 @@ public class SimpleFileServerTest {
             assertEquals(response.headers().firstValue("content-length").get(), expectedLength);
             assertEquals(response.headers().firstValue("last-modified").get(), lastModified);
             assertEquals(response.body(), expectedBody);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void testFavIconGET() throws Exception {
+        var root = Files.createDirectory(TEST_DIR.resolve("testFavIconGET"));
+
+        var server = SimpleFileServer.createFileServer(LOOPBACK_ADDR, root, OutputLevel.VERBOSE);
+        server.start();
+        try {
+            // expect built-in icon
+            var client = HttpClient.newBuilder().proxy(NO_PROXY).build();
+            var request = HttpRequest.newBuilder(uri(server, "favicon.ico")).build();
+            var response = client.send(request, BodyHandlers.ofString());
+            assertEquals(response.statusCode(), 200);
+            assertEquals(response.headers().firstValue("content-type").get(), "image/x-icon");
+            assertEquals(response.headers().firstValue("last-modified").get(), EXPECTED_LAST_MODIFIED_OF_FAVICON);
+
+            // expect custom (and broken) icon
+            var file = Files.writeString(root.resolve("favicon.ico"), "broken icon", CREATE);
+            try {
+                var lastModified = getLastModified(file);
+                var expectedLength = Long.toString(Files.size(file));
+                response = client.send(request, BodyHandlers.ofString());
+                assertEquals(response.statusCode(), 200);
+                assertEquals(response.headers().firstValue("content-type").get(), "application/octet-stream");
+                assertEquals(response.headers().firstValue("content-length").get(), expectedLength);
+                assertEquals(response.headers().firstValue("last-modified").get(), lastModified);
+            } finally {
+                Files.delete(file);
+            }
+
+            // expect built-in icon
+            response = client.send(request, BodyHandlers.ofString());
+            assertEquals(response.statusCode(), 200);
+            assertEquals(response.headers().firstValue("content-type").get(), "image/x-icon");
+            assertEquals(response.headers().firstValue("last-modified").get(), EXPECTED_LAST_MODIFIED_OF_FAVICON);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void testFavIconHEAD() throws Exception {
+        var root = Files.createDirectory(TEST_DIR.resolve("testFavIconHEAD"));
+
+        var server = SimpleFileServer.createFileServer(LOOPBACK_ADDR, root, OutputLevel.VERBOSE);
+        server.start();
+        try {
+            var client = HttpClient.newBuilder().proxy(NO_PROXY).build();
+            var request = HttpRequest.newBuilder(uri(server, "favicon.ico"))
+                    .method("HEAD", BodyPublishers.noBody()).build();
+            var response = client.send(request, BodyHandlers.ofString());
+            assertEquals(response.statusCode(), 200);
+            assertEquals(response.headers().firstValue("content-type").get(), "image/x-icon");
+            assertEquals(response.headers().firstValue("last-modified").get(), EXPECTED_LAST_MODIFIED_OF_FAVICON);
+            assertEquals(response.body(), "");
         } finally {
             server.stop(0);
         }
@@ -387,7 +449,7 @@ public class SimpleFileServerTest {
         var root = Files.createDirectory(TEST_DIR.resolve("testSymlinkGET"));
         var symlink = root.resolve("symlink");
         var target = Files.writeString(root.resolve("target.txt"), "some text", CREATE);
-        Files.createSymbolicLink(symlink, target);
+        createSymLink(symlink, target);
 
         var server = SimpleFileServer.createFileServer(LOOPBACK_ADDR, root, OutputLevel.VERBOSE);
         server.start();
@@ -414,7 +476,7 @@ public class SimpleFileServerTest {
         var symlink = root.resolve("symlink");
         var target = Files.createDirectory(root.resolve("target"));
         Files.writeString(target.resolve("aFile.txt"), "some text", CREATE);
-        Files.createSymbolicLink(symlink, target);
+        createSymLink(symlink, target);
 
         var server = SimpleFileServer.createFileServer(LOOPBACK_ADDR, root, OutputLevel.VERBOSE);
         server.start();
@@ -427,6 +489,16 @@ public class SimpleFileServerTest {
             assertEquals(response.body(), expectedBody);
         } finally {
             server.stop(0);
+        }
+    }
+
+    private void createSymLink(Path symlink, Path target) {
+        try {
+            Files.createSymbolicLink(symlink, target);
+        } catch (UnsupportedOperationException uoe) {
+            throw new SkipException("sym link creation not supported", uoe);
+        } catch (IOException ioe) {
+            throw new SkipException("probably insufficient privileges to create sym links (Windows)", ioe);
         }
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "jfr/jni/jfrJavaSupport.hpp"
 #include "jfr/recorder/jfrRecorder.hpp"
 #include "jfr/recorder/service/jfrPostBox.hpp"
@@ -32,15 +31,15 @@
 #include "logging/log.hpp"
 #include "runtime/handles.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
+#include "runtime/javaThread.hpp"
 #include "runtime/mutexLocker.hpp"
-#include "runtime/thread.inline.hpp"
 
 //
 // Entry point for "JFR Recorder Thread" message loop.
 // The recorder thread executes service requests collected from the message system.
 //
 void recorderthread_entry(JavaThread* thread, JavaThread* unused) {
-  assert(thread != NULL, "invariant");
+  assert(thread != nullptr, "invariant");
   #define START (msgs & (MSGBIT(MSG_START)))
   #define SHUTDOWN (msgs & MSGBIT(MSG_SHUTDOWN))
   #define ROTATE (msgs & (MSGBIT(MSG_ROTATE)|MSGBIT(MSG_STOP)))
